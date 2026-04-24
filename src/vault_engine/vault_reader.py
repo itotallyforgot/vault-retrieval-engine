@@ -127,8 +127,9 @@ def iter_pages(vault_path: Path) -> list[Page]:
 def build_alias_map(pages: list[Page]) -> dict[str, Page]:
     """Map every alias / title / slug -> Page (lowercased keys for case-insensitive lookup).
 
-    Last-write-wins on conflicts; collisions are logged-not-raised so the engine
-    keeps working when the vault has duplicate aliases.
+    Last-write-wins on conflicts. Duplicate aliases are surfaced separately by
+    the `/vault lint` skill, not raised here, so the engine keeps working when
+    the vault has imperfect frontmatter.
     """
     alias_map: dict[str, Page] = {}
     for page in pages:
