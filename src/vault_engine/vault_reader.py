@@ -74,3 +74,64 @@ def read_page(path: Path) -> Page:
         body=fm.content,
         frontmatter=fm_dict,
     )
+
+
+# Inline-code-fence-aware wikilink regex.
+# Strips ` ... ` inline code spans before extracting [[...]] tokens.
+_INLINE_CODE = re.compile(r"`[^`]*`")
+_WIKILINK = re.compile(r"\[\[([^\]\n]+?)\]\]")
+
+
+def parse_wikilinks(body: str) -> list[str]:
+    """Return target slugs of [[wikilinks]] in body, in order, deduped.
+
+    Strips inline `code` spans before matching so backtick-wrapped links don't count.
+    Handles `[[target]]`, `[[target|display]]`, `[[target#anchor]]`.
+    """
+    cleaned = _INLINE_CODE.sub("", body)
+    out: list[str] = []
+    seen: set[str] = set()
+    for match in _WIKILINK.finditer(cleaned):
+        token = match.group(1).strip()
+        # strip alias-display suffix: target|display
+        if "|" in token:
+            token = token.split("|", 1)[0].strip()
+        # strip anchor suffix: target#section
+        if "#" in token:
+            token = token.split("#", 1)[0].strip()
+        if token and token not in seen:
+            seen.add(token)
+            out.append(token)
+    return out
+
+
+def iter_pages(vault_path: Path) -> list[Page]:
+    """Walk the vault for markdown pages and read each.
+
+    Includes wiki/topics/, wiki/sources/, raw/. Skips _ops/, _templates/, and dotfiles.
+    Populates Page.wikilinks for every page.
+    """
+    out: list[Page] = []
+    for md_path in sorted(vault_path.rglob("*.md")):
+        parts = md_path.parts
+        if any(p.startswith(".") for p in parts):
+            continue
+        if any(p in {"_ops", "_templates", "skills"} for p in parts):
+            continue
+        page = read_page(md_path)
+        page.wikilinks = parse_wikilinks(page.body)
+        out.append(page)
+    return out
+
+
+def build_alias_map(pages: list[Page]) -> dict[str, Page]:
+    """Map every alias / title / slug -> Page (lowercased keys for case-insensitive lookup).
+
+    Last-write-wins on conflicts; collisions are logged-not-raised so the engine
+    keeps working when the vault has duplicate aliases.
+    """
+    alias_map: dict[str, Page] = {}
+    for page in pages:
+        for name in page.all_names:
+            alias_map[name.lower()] = page
+    return alias_map

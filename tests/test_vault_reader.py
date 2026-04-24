@@ -31,3 +31,42 @@ def test_slug_for_path_kebab_case(tmp_path: Path):
     p.parent.mkdir(parents=True)
     p.touch()
     assert slug_for_path(p) == "Some-Page"
+
+
+from vault_engine.vault_reader import (
+    iter_pages,
+    parse_wikilinks,
+    build_alias_map,
+)
+
+
+def test_parse_wikilinks_finds_targets():
+    body = "See [[alpha]], [[beta|the beta page]], and [[gamma#section]]."
+    links = parse_wikilinks(body)
+    assert links == ["alpha", "beta", "gamma"]
+
+
+def test_parse_wikilinks_ignores_code_fences():
+    body = "Inline `[[not-a-link]]`. Then real [[real-link]]."
+    links = parse_wikilinks(body)
+    assert "real-link" in links
+    assert "not-a-link" not in links
+
+
+def test_iter_pages_walks_wiki_and_raw(sample_vault):
+    pages = list(iter_pages(sample_vault))
+    slugs = sorted(p.slug for p in pages)
+    assert slugs == [
+        "2026-01-01-alpha-raw",
+        "2026-01-01-alpha-source",
+        "alpha",
+        "beta",
+    ]
+
+
+def test_build_alias_map_maps_titles_aliases_slugs(sample_vault):
+    pages = list(iter_pages(sample_vault))
+    alias_map = build_alias_map(pages)
+    assert alias_map["alpha"].slug == "alpha"
+    assert alias_map["alpha-thing"].slug == "alpha"
+    assert alias_map["beta"].slug == "beta"
