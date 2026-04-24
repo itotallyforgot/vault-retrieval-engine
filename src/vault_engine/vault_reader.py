@@ -50,7 +50,12 @@ def kind_for_path(path: Path) -> str:
 
 
 def read_page(path: Path) -> Page:
-    """Parse a single markdown page from disk."""
+    """Parse a single markdown page from disk.
+
+    YAML dates (`last_updated: 2026-01-01`) are parsed by python-frontmatter
+    as `datetime.date` objects. We normalize all date/datetime values to ISO
+    strings so downstream consumers see consistent string types.
+    """
     text = path.read_text(encoding="utf-8")
     fm = frontmatter.loads(text)
     fm_dict: dict[str, Any] = {
