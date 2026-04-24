@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.coverage
+.venv/
+htmlcov/
+
+# Project state (caches, never committed)
+.engine-cache/
+*.db
+*.db-journal
+*.pkl
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

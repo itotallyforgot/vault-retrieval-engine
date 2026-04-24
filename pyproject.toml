@@ -1,0 +1,45 @@
+[project]
+name = "vault-engine"
+version = "0.1.0"
+description = "Local retrieval engine over the Second-Brain vault."
+requires-python = ">=3.12"
+dependencies = [
+    "sentence-transformers>=3.3.0",
+    "torch>=2.5.0",
+    "sqlite-vec>=0.1.6",
+    "networkx>=3.4",
+    "watchdog>=6.0",
+    "python-frontmatter>=1.1",
+    "mistune>=3.0",
+    "typer>=0.15",
+    "pydantic>=2.9",
+    "rich>=13.9",
+]
+
+[project.scripts]
+vault-engine = "vault_engine.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.7",
+]
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "integration: requires real embedding model and GPU",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
