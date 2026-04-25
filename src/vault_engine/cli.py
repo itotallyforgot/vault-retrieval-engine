@@ -177,6 +177,7 @@ def eval_cmd(
     cfg: EngineConfig = _state["cfg"]  # type: ignore[assignment]
 
     # Override embedder if specified
+    active_embedder: Embedder
     if embedder == "mock":
         active_embedder = MockEmbedder(dim=cfg.embedding_dim)
     else:
