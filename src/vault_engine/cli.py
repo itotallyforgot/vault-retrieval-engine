@@ -28,7 +28,7 @@ _state: dict[str, object] = {}
 @app.callback()
 def main(
     ctx: typer.Context,
-    vault: Path = typer.Option(None, "--vault", help="Path to the vault root."),
+    vault: Path | None = typer.Option(None, "--vault", help="Path to the vault root."),
     cache: Path | None = typer.Option(None, "--cache", help="Cache directory."),
     mock_embedder: bool = typer.Option(
         False, "--mock-embedder", help="Use deterministic mock embedder (tests only)."
