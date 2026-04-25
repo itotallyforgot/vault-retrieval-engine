@@ -45,7 +45,7 @@ class VecStore:
     def open(self, force_reset: bool = False) -> None:
         if force_reset and self.db_path.exists():
             self.db_path.unlink()
-        self._conn = sqlite3.connect(str(self.db_path))
+        self._conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._conn.enable_load_extension(True)
         sqlite_vec.load(self._conn)
         self._conn.enable_load_extension(False)
