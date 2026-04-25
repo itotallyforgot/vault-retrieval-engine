@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import networkx as nx
-import community as community_louvain  # python-louvain package
+import community as community_louvain  # type: ignore[import-untyped]  # python-louvain package; no stubs
 
 
 def compute_communities(graph: nx.Graph) -> dict[str, int]:
@@ -14,7 +14,7 @@ def compute_communities(graph: nx.Graph) -> dict[str, int]:
     if graph.number_of_nodes() == 0:
         return {}
     undirected = graph.to_undirected() if graph.is_directed() else graph
-    return community_louvain.best_partition(undirected, random_state=42)
+    return community_louvain.best_partition(undirected, random_state=42)  # type: ignore[attr-defined]
 
 
 def communities_summary(graph: nx.Graph) -> dict[int, dict[str, object]]:

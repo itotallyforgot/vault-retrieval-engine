@@ -4,7 +4,6 @@ from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer
 from vault_engine.stores.graph_store import GraphStore
-from vault_engine.stores.vec_store import VecStore
 
 
 def test_indexer_emits_extracted_edges(sample_vault: Path, tmp_path: Path):
