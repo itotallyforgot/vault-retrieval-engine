@@ -63,3 +63,23 @@ def test_consolidation_candidates_flags_orphan_raw(sample_vault: Path, tmp_path:
         assert "2026-01-01-alpha-raw" in candidates.orphan_pages
     finally:
         idx.close()
+
+
+def test_graph_walk_from_seeds_returns_paths(sample_vault: Path, tmp_path: Path):
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        paths = r.graph_walk(seeds=["2026-01-01-alpha-source"], depth=2)
+        slug_paths = [list(p) for p in paths]
+        assert any(p == ["2026-01-01-alpha-source", "alpha", "beta"] for p in slug_paths)
+    finally:
+        idx.close()
+
+
+def test_multi_hop_returns_paths_touching_multiple_seeds(sample_vault: Path, tmp_path: Path):
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        result = r.multi_hop(seed_query="alpha and beta", min_seeds_touched=2)
+        # Should find at least one path through alpha->beta region.
+        assert any("alpha" in p and "beta" in p for p in result.paths)
+    finally:
+        idx.close()

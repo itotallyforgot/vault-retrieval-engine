@@ -107,3 +107,50 @@ class Retrieval:
             if page.slug == page_slug:
                 return page.path
         return None
+
+
+@dataclass
+class MultiHopResult:
+    seeds: list[str]
+    paths: list[list[str]]
+
+
+class _RetrievalGraphMixin:
+    """Inline mixin to keep graph methods grouped — methods attached below."""
+    pass
+
+
+def _retrieval_graph_walk(
+    self: "Retrieval",
+    seeds: list[str],
+    depth: int | None = None,
+) -> list[list[str]]:
+    depth = depth or self.cfg.graph_max_depth
+    return self.indexer.graph.walk(seeds=seeds, max_depth=depth)
+
+
+def _retrieval_multi_hop(
+    self: "Retrieval",
+    seed_query: str,
+    min_seeds_touched: int = 2,
+    depth: int | None = None,
+) -> "MultiHopResult":
+    """Find seed pages via semantic search, then BFS for paths that touch >= min_seeds."""
+    depth = depth or self.cfg.graph_max_depth
+    hits = self.search(seed_query, k=self.cfg.semantic_top_k)
+    seed_slugs: list[str] = []
+    for h in hits:
+        if h.page_slug not in seed_slugs:
+            seed_slugs.append(h.page_slug)
+    all_paths = self.indexer.graph.walk(seeds=seed_slugs, max_depth=depth)
+    seed_set = set(seed_slugs)
+    filtered = [
+        p for p in all_paths
+        if len(seed_set.intersection(p)) >= min_seeds_touched
+    ]
+    return MultiHopResult(seeds=seed_slugs, paths=filtered)
+
+
+# Attach methods to Retrieval after class definition (keeps single-class import clean).
+Retrieval.graph_walk = _retrieval_graph_walk  # type: ignore[attr-defined]
+Retrieval.multi_hop = _retrieval_multi_hop    # type: ignore[attr-defined]
