@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 
 from vault_engine.config import EngineConfig
-from vault_engine.embedder import MockEmbedder, SentenceTransformerEmbedder
+from vault_engine.embedder import SentenceTransformerEmbedder
 from vault_engine.indexer import Indexer
 from vault_engine.router import Router
 from vault_engine.stores.graph_store import GraphStore
