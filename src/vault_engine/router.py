@@ -9,6 +9,9 @@ import re
 from enum import Enum
 from typing import TYPE_CHECKING
 
+from vault_engine.reranker import FusedHit, RankedHit, reciprocal_rank_fusion
+from vault_engine.retrieval import topology_walk
+
 if TYPE_CHECKING:
     from vault_engine.config import EngineConfig
     from vault_engine.embedder import Embedder
@@ -106,14 +109,14 @@ class Router:
             topology_hits – list[RankedHit] from graph walk (up to top_k; [] if skipped)
             fused_hits    – list[FusedHit] after RRF merge (up to top_k)
         """
-        from vault_engine.reranker import FusedHit, RankedHit, reciprocal_rank_fusion
-        from vault_engine.retrieval import topology_walk
-
         intent = self._classify(query)
 
         vector_hits = self._vector_search(query, top_k=top_k * 2)
 
         topology_hits: list[RankedHit] = []
+        # HYBRID is included alongside MULTI_HOP because it explicitly mixes
+        # semantic + graph signals — running topology without an explicit seed
+        # is appropriate (top vector hit anchors the walk via _infer_seed).
         if seed_node is not None or intent in (QueryMode.MULTI_HOP, QueryMode.HYBRID):
             anchor = seed_node or self._infer_seed(vector_hits)
             if anchor:
@@ -150,8 +153,6 @@ class Router:
 
     def _vector_search(self, query: str, *, top_k: int) -> list:
         """Run KNN search and return list[RankedHit]."""
-        from vault_engine.reranker import RankedHit
-
         # MockEmbedder / SentenceTransformerEmbedder both expose .encode(list[str]).
         emb = self.embedder.encode([query])[0]
         # VecStore.search returns list[VecHit]; each has .page_slug and .distance.
