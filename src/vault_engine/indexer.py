@@ -105,4 +105,5 @@ class Indexer:
 
         # Always rebuild the graph after a single-page change — cheap at vault scale.
         self.graph.rebuild(iter_pages(self.cfg.vault_path))
+        self.graph.finalize_build()
         return report

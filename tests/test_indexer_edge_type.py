@@ -39,3 +39,24 @@ def test_indexer_full_rebuild_assigns_communities(sample_vault: Path, tmp_path: 
 
     for node, data in graph.graph.nodes(data=True):
         assert "community" in data, f"{node} missing community"
+
+
+def test_indexer_reindex_page_preserves_communities(sample_vault: Path, tmp_path: Path):
+    cfg = EngineConfig(
+        vault_path=sample_vault,
+        cache_dir=tmp_path / "cache",
+        embedding_model="mock",
+        embedding_dim=8,
+    )
+    graph = GraphStore()
+    indexer = Indexer(cfg, embedder=MockEmbedder(dim=8))
+    indexer.graph = graph
+    indexer.open()
+    indexer.rebuild()
+
+    # Pick any page from the sample vault and reindex it.
+    target = next(sample_vault.rglob("*.md"))
+    indexer.reindex_page(target)
+
+    for node, data in graph.graph.nodes(data=True):
+        assert "community" in data, f"{node} missing community after reindex_page"
