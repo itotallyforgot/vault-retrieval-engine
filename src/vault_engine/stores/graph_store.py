@@ -11,6 +11,7 @@ from collections.abc import Iterable
 
 import networkx as nx
 
+from vault_engine.community import annotate_graph_with_communities
 from vault_engine.vault_reader import Page, build_alias_map
 
 
@@ -104,3 +105,7 @@ class GraphStore:
 
     def neighbors(self, slug: str) -> list[str]:
         return list(self.graph.successors(slug)) if self.graph.has_node(slug) else []
+
+    def finalize_build(self) -> None:
+        """Call after all add_node / add_edge are done. Annotates communities on nodes."""
+        annotate_graph_with_communities(self.graph)

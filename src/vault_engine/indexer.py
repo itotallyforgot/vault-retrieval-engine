@@ -72,6 +72,7 @@ class Indexer:
             report.pages_processed += 1
 
         self.graph.rebuild(pages)
+        self.graph.finalize_build()
         return report
 
     def reindex_page(self, path: Path) -> IndexReport:
