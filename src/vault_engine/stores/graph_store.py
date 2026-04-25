@@ -23,6 +23,10 @@ class GraphStore:
         self.graph: nx.DiGraph = nx.DiGraph()
         self._alias_map: dict[str, Page] = {}
 
+    def add_node(self, slug: str, **attrs: object) -> None:
+        """Add a node with arbitrary attributes. Thin pass-through to nx.DiGraph.add_node."""
+        self.graph.add_node(slug, **attrs)
+
     def add_edge(
         self,
         src: str,

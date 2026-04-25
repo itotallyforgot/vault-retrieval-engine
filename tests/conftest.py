@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from vault_engine.embedder import MockEmbedder
+from vault_engine.stores.graph_store import GraphStore
 
 
 @pytest.fixture
@@ -75,3 +76,8 @@ def sample_vault(tmp_path: Path) -> Path:
 @pytest.fixture
 def mock_embedder() -> MockEmbedder:
     return MockEmbedder(dim=64)
+
+
+@pytest.fixture
+def empty_graph_store() -> GraphStore:
+    return GraphStore()
