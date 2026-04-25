@@ -34,9 +34,12 @@ def main(
         False, "--mock-embedder", help="Use deterministic mock embedder (tests only)."
     ),
 ) -> None:
-    # Sub-commands that don't need a vault (e.g. hook install) skip setup.
-    if vault is None:
+    # Sub-commands that don't need a vault (e.g. `hook`) skip setup.
+    if ctx.invoked_subcommand == "hook":
         return
+    if vault is None:
+        typer.echo("Error: --vault is required for this command.", err=True)
+        raise typer.Exit(2)
     cfg = EngineConfig(
         vault_path=vault,
         cache_dir=cache or EngineConfig(vault_path=vault).cache_dir,
