@@ -1,8 +1,6 @@
 """Dual-channel Router tests: vector + topology fan-out fused via RRF."""
 import hashlib
 
-import pytest
-
 from vault_engine.router import Router
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecStore
