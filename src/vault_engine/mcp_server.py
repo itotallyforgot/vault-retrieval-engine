@@ -7,6 +7,7 @@ Vault-specific tools are added on top with distinct names.
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Callable
 
@@ -15,6 +16,8 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 
 from vault_engine.service import Service
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -321,8 +324,14 @@ def build_server(svc: Service) -> _ServerHandle:
         if handler is None:
             return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
         try:
-            return [types.TextContent(type="text", text=handler(arguments))]
+            # Hold the (reentrant) service lock so concurrent watcher
+            # reindexes can't mutate the graph mid-iteration. Handlers that
+            # internally call svc.query() re-enter the lock safely.
+            with svc._lock:
+                text = handler(arguments)
+            return [types.TextContent(type="text", text=text)]
         except Exception as exc:
+            log.exception("MCP tool %s failed; args=%r", name, arguments)
             return [types.TextContent(type="text", text=f"Error executing {name}: {exc}")]
 
     # Expose for tests

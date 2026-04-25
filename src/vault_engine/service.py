@@ -53,7 +53,10 @@ class Service:
         )
 
         self.watcher: VaultWatcher | None = None
-        self._lock = threading.Lock()
+        # Reentrant: callers (e.g. MCP wrapper) may take the lock and then
+        # invoke svc.query() which also takes it. RLock prevents that
+        # recursion from deadlocking.
+        self._lock = threading.RLock()
         self._running = False
 
     # ------------------------------------------------------------------
