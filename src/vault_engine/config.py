@@ -28,6 +28,13 @@ class EngineConfig:
     semantic_top_k: int = 10
     graph_max_depth: int = 3
 
+    # --- P2 additions ---
+    http_bind_addr: str = "127.0.0.1"      # default: loopback only
+    http_port: int = 7842
+    http_token: str | None = None           # None disables HTTP auth gate (loopback-only)
+    mcp_enabled: bool = False
+    service_pidfile: Path | None = None
+
     def __post_init__(self) -> None:
         self.vault_path = Path(self.vault_path).expanduser().resolve()
         if not self.vault_path.exists():
