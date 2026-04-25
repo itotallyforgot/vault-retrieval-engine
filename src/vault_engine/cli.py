@@ -34,8 +34,10 @@ def main(
         False, "--mock-embedder", help="Use deterministic mock embedder (tests only)."
     ),
 ) -> None:
-    # Sub-commands that don't need a vault (e.g. `hook`) skip setup.
-    if ctx.invoked_subcommand == "hook":
+    # Sub-commands that take their own --vault (or none at all) skip setup.
+    # `hook` has no vault state. `serve`/`mcp` construct their own EngineConfig
+    # from their own --vault flag so they can run as long-lived processes.
+    if ctx.invoked_subcommand in ("hook", "serve", "mcp"):
         return
     if vault is None:
         typer.echo("Error: --vault is required for this command.", err=True)
