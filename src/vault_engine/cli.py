@@ -1,6 +1,9 @@
 """vault-engine CLI."""
 from __future__ import annotations
 
+import json
+import platform
+import shutil
 from pathlib import Path
 
 import typer
@@ -25,12 +28,15 @@ _state: dict[str, object] = {}
 @app.callback()
 def main(
     ctx: typer.Context,
-    vault: Path = typer.Option(..., "--vault", help="Path to the vault root."),
+    vault: Path = typer.Option(None, "--vault", help="Path to the vault root."),
     cache: Path | None = typer.Option(None, "--cache", help="Cache directory."),
     mock_embedder: bool = typer.Option(
         False, "--mock-embedder", help="Use deterministic mock embedder (tests only)."
     ),
 ) -> None:
+    # Sub-commands that don't need a vault (e.g. hook install) skip setup.
+    if vault is None:
+        return
     cfg = EngineConfig(
         vault_path=vault,
         cache_dir=cache or EngineConfig(vault_path=vault).cache_dir,
@@ -51,6 +57,11 @@ def _open_indexer() -> Indexer:
     idx = Indexer(cfg=cfg, embedder=embedder)
     idx.open()
     return idx
+
+
+# ---------------------------------------------------------------------------
+# P1 commands (unchanged)
+# ---------------------------------------------------------------------------
 
 
 @app.command()
@@ -166,6 +177,105 @@ def eval_cmd(
             raise typer.Exit(code=1)
     finally:
         idx.close()
+
+
+# ---------------------------------------------------------------------------
+# P2 commands: serve, mcp
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def serve(
+    vault: Path = typer.Option(..., "--vault", help="Path to vault root."),
+    cache: Path | None = typer.Option(None, "--cache", help="Cache directory."),
+) -> None:
+    """Run the HTTP server long-lived (P2)."""
+    import uvicorn
+
+    from vault_engine.config import load_config
+    from vault_engine.http_server import build_app
+    from vault_engine.service import Service
+
+    cfg = load_config(vault, cache)
+    svc = Service(cfg)
+    svc.start()
+    application = build_app(svc, secret=cfg.http_token)
+    uvicorn.run(application, host=cfg.http_bind_addr, port=cfg.http_port, log_level="info")
+
+
+@app.command()
+def mcp(
+    vault: Path = typer.Option(..., "--vault", help="Path to vault root."),
+    cache: Path | None = typer.Option(None, "--cache", help="Cache directory."),
+) -> None:
+    """Run the MCP stdio server."""
+    from vault_engine.config import load_config
+    from vault_engine.mcp_server import serve_stdio
+    from vault_engine.service import Service
+
+    cfg = load_config(vault, cache)
+    svc = Service(cfg)
+    svc.start()
+    serve_stdio(svc)
+
+
+# ---------------------------------------------------------------------------
+# P2 hook subcommand group
+# ---------------------------------------------------------------------------
+
+hook_app = typer.Typer(help="Vault hook management")
+app.add_typer(hook_app, name="hook")
+
+
+@hook_app.command("install")
+def hook_install(
+    vault: Path = typer.Option(..., help="Path to vault root"),
+    dry_run: bool = typer.Option(False, help="Print intended writes, do nothing"),
+) -> None:
+    """Install PreToolUse hook into <vault>/.claude/settings.json (E1)."""
+    repo_root = Path(__file__).resolve().parents[2]
+    src_assets = repo_root / "_vault_assets"
+    settings_path = vault / ".claude" / "settings.json"
+    hooks_dir = vault / ".claude" / "hooks"
+
+    is_windows = platform.system().lower().startswith("win")
+    script_name = "vault_query_hint.ps1" if is_windows else "vault_query_hint.sh"
+    src_script = src_assets / ("claude_query_hint.ps1" if is_windows else "claude_query_hint.sh")
+    dst_script = hooks_dir / script_name
+
+    settings_addition = json.loads((src_assets / "claude_settings_hook.json").read_text())
+    for entry in settings_addition.get("hooks", {}).get("PreToolUse", []):
+        entry["command"] = str(dst_script)
+
+    if dry_run:
+        typer.echo(f"Would write {settings_path}")
+        typer.echo(f"Would write {dst_script}")
+        return
+
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src_script, dst_script)
+    if not is_windows:
+        dst_script.chmod(0o755)
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    if settings_path.exists():
+        existing = json.loads(settings_path.read_text())
+    else:
+        existing = {}
+
+    pre_tool = existing.setdefault("hooks", {}).setdefault("PreToolUse", [])
+    new_entries = settings_addition["hooks"]["PreToolUse"]
+    for new_entry in new_entries:
+        if not any(
+            e.get("matcher") == new_entry["matcher"]
+            and e.get("command") == new_entry["command"]
+            for e in pre_tool
+        ):
+            pre_tool.append(new_entry)
+
+    settings_path.write_text(json.dumps(existing, indent=2))
+    typer.echo(f"Installed PreToolUse hook -> {settings_path}")
+    typer.echo(f"Hook script -> {dst_script}")
 
 
 if __name__ == "__main__":
