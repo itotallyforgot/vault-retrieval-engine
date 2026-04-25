@@ -23,3 +23,21 @@ def test_citation_chain_no_path_returns_none():
     gs.add_node("a", title="A", kind="topic")
     gs.add_node("b", title="B", kind="topic")
     assert build_citation_chain(gs, anchor="a", target="b") is None
+
+
+def test_citation_chain_respects_max_hops_boundary():
+    """A 3-hop path is returned at max_hops=3 and rejected at max_hops=2."""
+    gs = GraphStore()
+    for slug in ("a", "b", "c", "d"):
+        gs.add_node(slug, title=slug.upper(), kind="topic")
+    gs.add_edge("a", "b", relation="links")
+    gs.add_edge("b", "c", relation="links")
+    gs.add_edge("c", "d", relation="links")
+
+    # Path a->b->c->d has 3 hops.
+    accepted = build_citation_chain(gs, anchor="a", target="d", max_hops=3)
+    assert accepted is not None
+    assert len(accepted.hops) == 3
+
+    rejected = build_citation_chain(gs, anchor="a", target="d", max_hops=2)
+    assert rejected is None
