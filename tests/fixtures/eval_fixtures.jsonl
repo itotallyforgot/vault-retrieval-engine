@@ -1,0 +1,2 @@
+{"id": "f1", "query": "test query one", "expected_pages": [], "min_citation_depth": 0, "mode": "lookup", "max_latency_ms": 5000}
+{"id": "f2", "query": "test query two", "expected_pages": [], "min_citation_depth": 0, "mode": "lookup", "max_latency_ms": 5000}

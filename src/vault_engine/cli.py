@@ -37,6 +37,7 @@ def main(
     # Sub-commands that take their own --vault (or none at all) skip setup.
     # `hook` has no vault state. `serve`/`mcp` construct their own EngineConfig
     # from their own --vault flag so they can run as long-lived processes.
+    # `eval` manages its own embedder selection, but still needs vault setup.
     if ctx.invoked_subcommand in ("hook", "serve", "mcp"):
         return
     if vault is None:
@@ -163,11 +164,26 @@ def eval_cmd(
     fixtures: Path = typer.Option(
         ..., "--fixtures", help="Path to retrieval-fixtures.jsonl."
     ),
+    embedder: str = typer.Option(
+        "default", "--embedder", help="Embedder to use: 'default' (SentenceTransformer) or 'mock'."
+    ),
+    threshold: float = typer.Option(
+        None, "--threshold", help="Pass-rate threshold (0.0–1.0). Exit code 1 if passed/total < threshold."
+    ),
 ) -> None:
     """Run the eval fixture suite against the engine."""
     from vault_engine.eval import EvalRunner
 
-    idx = _open_indexer()
+    cfg: EngineConfig = _state["cfg"]  # type: ignore[assignment]
+
+    # Override embedder if specified
+    if embedder == "mock":
+        active_embedder = MockEmbedder(dim=cfg.embedding_dim)
+    else:
+        active_embedder = _state["embedder"]  # type: ignore[assignment]
+
+    idx = Indexer(cfg=cfg, embedder=active_embedder)
+    idx.open()
     try:
         idx.rebuild()
         r = Retrieval(cfg=idx.cfg, indexer=idx, embedder=idx.embedder)
@@ -178,6 +194,15 @@ def eval_cmd(
         console.print(f"[red]failed[/red]: {report.failed}")
         for f in report.failures:
             console.print(f"  [red]{f.id}[/red] — {f.reason} ({f.latency_ms}ms)")
+
+        # Check pass-rate threshold if specified
+        if threshold is not None and report.total > 0:
+            pass_rate = report.passed / report.total
+            if pass_rate < threshold:
+                console.print(f"[red]FAIL: pass-rate {pass_rate:.2%} < threshold {threshold:.2%}[/red]")
+                raise typer.Exit(code=1)
+
+        # Fail if any tests failed (unless threshold check passed above)
         if report.failed > 0:
             raise typer.Exit(code=1)
     finally:
