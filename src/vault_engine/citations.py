@@ -10,12 +10,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import networkx as nx
 
 from vault_engine.config import EngineConfig
 from vault_engine.retrieval import Retrieval, SearchHit
 from vault_engine.vault_reader import iter_pages, read_page
+
+if TYPE_CHECKING:
+    from vault_engine.stores.graph_store import GraphStore
 
 
 @dataclass
@@ -112,8 +116,6 @@ def build_citation_chain(
     Returns None if anchor or target doesn't exist, or if no path exists.
     Returns None if path exceeds max_hops.
     """
-    from vault_engine.stores.graph_store import GraphStore
-
     G = graph_store.graph
     if anchor not in G or target not in G:
         return None
