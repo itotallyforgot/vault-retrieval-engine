@@ -1,11 +1,9 @@
 """Tests for topology_walk retrieval channel."""
-import pytest
-
 from vault_engine.retrieval import topology_walk
 from vault_engine.stores.graph_store import GraphStore
 
 
-def test_topology_walk_returns_neighbors_within_depth(tmp_path):
+def test_topology_walk_returns_neighbors_within_depth():
     gs = GraphStore()
     gs.add_node("A", title="A")
     gs.add_node("B", title="B")

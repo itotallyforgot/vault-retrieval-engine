@@ -12,6 +12,7 @@ from vault_engine.config import EngineConfig
 from vault_engine.embedder import Embedder
 from vault_engine.indexer import Indexer
 from vault_engine.reranker import RankedHit
+from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecHit
 from vault_engine.vault_reader import iter_pages, read_page
 
