@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from vault_engine.embedder import MockEmbedder
+
 
 @pytest.fixture
 def sample_vault(tmp_path: Path) -> Path:
@@ -68,3 +70,8 @@ def sample_vault(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return vault
+
+
+@pytest.fixture
+def mock_embedder() -> MockEmbedder:
+    return MockEmbedder(dim=64)
