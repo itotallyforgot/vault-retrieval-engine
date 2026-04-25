@@ -9,7 +9,7 @@ from vault_engine.config import EngineConfig
 from vault_engine.embedder import Embedder
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecStore
-from vault_engine.vault_reader import Page, iter_pages, parse_wikilinks, read_page
+from vault_engine.vault_reader import iter_pages, parse_wikilinks, read_page
 
 
 @dataclass
@@ -86,8 +86,7 @@ class Indexer:
             page = read_page(path)
             page.wikilinks = parse_wikilinks(page.body)
             chunks = chunk_page(page.slug, page.body)
-            # Drop any old chunks not in the new set.
-            existing_idxs = {c.idx for c in chunks}
+            # Drop all prior chunks for this page; the new chunk set replaces them.
             self.vec.delete_page(page.slug)
             if chunks:
                 vectors = self.embedder.encode([c.text for c in chunks])
