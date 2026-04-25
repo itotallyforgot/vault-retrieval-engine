@@ -44,7 +44,7 @@ def build_app(svc: Service, *, secret: str | None) -> FastAPI:
             {
                 "doc_id": h.doc_id,
                 "rrf_score": h.rrf_score,
-                "channels": list(set(h.channels)),
+                "channels": list(dict.fromkeys(h.channels)),  # dedupe, preserve order
                 "per_channel_scores": h.per_channel_scores,
             }
             for h in result["fused_hits"]
