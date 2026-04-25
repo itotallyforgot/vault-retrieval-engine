@@ -161,7 +161,12 @@ Retrieval.multi_hop = _retrieval_multi_hop    # type: ignore[attr-defined]
 def topology_walk(
     graph_store: "GraphStore", seed: str, depth: int = 3
 ) -> list[RankedHit]:
-    """BFS from seed; closer nodes rank higher.
+    """BFS from seed over outbound edges; closer nodes rank higher.
+
+    Follows wikilink direction (page-mentions -> page-mentioned), so the walk
+    explores what the seed page references, not what references it. For
+    bidirectional reachability, callers should call this twice (once with the
+    graph reversed) and merge.
 
     Score is 1/(distance+1). Filters out the seed itself. Returns RankedHit
     list ordered best-first.
