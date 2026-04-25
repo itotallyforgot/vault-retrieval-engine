@@ -77,15 +77,25 @@ class Service:
             )
 
     def stop(self) -> None:
-        """Stop the watcher and close stores."""
+        """Stop the watcher and close stores.
+
+        Watcher.stop() blocks waiting for the observer thread, which itself
+        may be waiting on `_lock` to deliver a pending `_on_change` callback.
+        We therefore detach the watcher and DROP the lock before joining the
+        observer to avoid a circular wait.
+        """
         with self._lock:
             if not self._running:
                 return
-            if self.watcher is not None:
-                self.watcher.stop()
-                self.watcher = None
-            self.indexer.close()
+            watcher = self.watcher
+            self.watcher = None
             self._running = False
+
+        if watcher is not None:
+            watcher.stop()
+
+        with self._lock:
+            self.indexer.close()
             log.info("Service stopped.")
 
     def is_running(self) -> bool:
