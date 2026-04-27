@@ -1,4 +1,5 @@
 """Louvain community detection for the in-memory graph."""
+
 from __future__ import annotations
 
 import networkx as nx

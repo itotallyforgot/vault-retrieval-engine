@@ -1,4 +1,5 @@
 """Dual-channel Router tests: vector + topology fan-out fused via RRF."""
+
 import hashlib
 
 import pytest

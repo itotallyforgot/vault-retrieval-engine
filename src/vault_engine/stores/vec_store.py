@@ -7,6 +7,7 @@ Schema:
                    fingerprint that gates open() against silent vector-space
                    corruption when the configured model changes.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -109,9 +110,7 @@ class VecStore:
 
     def embedding_fingerprint(self) -> tuple[str, int]:
         assert self._conn is not None
-        cur = self._conn.execute(
-            "SELECT model_name, dim FROM embedding_meta WHERE singleton=1"
-        )
+        cur = self._conn.execute("SELECT model_name, dim FROM embedding_meta WHERE singleton=1")
         row = cur.fetchone()
         return (row[0], row[1])
 
@@ -160,9 +159,7 @@ class VecStore:
 
     def delete_page(self, page_slug: str) -> int:
         assert self._conn is not None
-        cur = self._conn.execute(
-            "SELECT rowid FROM chunk_meta WHERE page_slug=?", (page_slug,)
-        )
+        cur = self._conn.execute("SELECT rowid FROM chunk_meta WHERE page_slug=?", (page_slug,))
         rowids = [r[0] for r in cur.fetchall()]
         for rid in rowids:
             self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rid,))

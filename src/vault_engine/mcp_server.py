@@ -4,6 +4,7 @@ Tool naming + shapes intentionally mirror Graphify's serve.py so that an agent
 which already knows Graphify's surface can drive this engine without relearning.
 Vault-specific tools are added on top with distinct names.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class _ServerHandle:
     """Test-friendly wrapper exposing handlers as plain coroutines."""
+
     list_tools_handler: Callable
     call_tool_handler: Callable
     server: Server
@@ -172,14 +174,16 @@ def build_server(svc: Service) -> _ServerHandle:
             else:
                 return f"No node matching {label!r}."
         d = G.nodes[label]
-        return "\n".join([
-            f"Node: {d.get('title', label)}",
-            f"  ID: {label}",
-            f"  Path: {d.get('path', '')}",
-            f"  Kind: {d.get('kind', '')}",
-            f"  Community: {d.get('community', '')}",
-            f"  Degree: {G.degree(label)}",
-        ])
+        return "\n".join(
+            [
+                f"Node: {d.get('title', label)}",
+                f"  ID: {label}",
+                f"  Path: {d.get('path', '')}",
+                f"  Kind: {d.get('kind', '')}",
+                f"  Community: {d.get('community', '')}",
+                f"  Degree: {G.degree(label)}",
+            ]
+        )
 
     def _get_neighbors(args: dict) -> str:
         label = args["label"]
@@ -213,9 +217,7 @@ def build_server(svc: Service) -> _ServerHandle:
     def _god_nodes(args: dict) -> str:
         top_n = int(args.get("top_n", 10))
         G = svc.graph_store.graph
-        ranked = sorted(
-            G.nodes(data=True), key=lambda nd: G.degree(nd[0]), reverse=True
-        )[:top_n]
+        ranked = sorted(G.nodes(data=True), key=lambda nd: G.degree(nd[0]), reverse=True)[:top_n]
         lines = ["God nodes (most connected):"]
         for i, (nid, d) in enumerate(ranked, 1):
             lines.append(f"  {i}. {d.get('title', nid)} - {G.degree(nid)} edges")
@@ -228,9 +230,7 @@ def build_server(svc: Service) -> _ServerHandle:
             t = d.get("edge_type", "EXTRACTED")
             types_count[t] = types_count.get(t, 0) + 1
         total = sum(types_count.values()) or 1
-        communities = {
-            d.get("community") for _, d in G.nodes(data=True) if "community" in d
-        }
+        communities = {d.get("community") for _, d in G.nodes(data=True) if "community" in d}
         return (
             f"Nodes: {G.number_of_nodes()}\n"
             f"Edges: {G.number_of_edges()}\n"
@@ -242,6 +242,7 @@ def build_server(svc: Service) -> _ServerHandle:
 
     def _shortest_path(args: dict) -> str:
         from vault_engine.citations import build_citation_chain
+
         chain = build_citation_chain(
             svc.graph_store,
             anchor=args["source"],
@@ -263,14 +264,14 @@ def build_server(svc: Service) -> _ServerHandle:
         # Reuse vector-channel; restrict to topic-kind nodes.
         result = svc.query(args["query"], top_k=5)
         topic_hits = [
-            h for h in result["fused_hits"]
+            h
+            for h in result["fused_hits"]
             if svc.graph_store.graph.nodes.get(h.doc_id, {}).get("kind") == "topic"
         ]
         if not topic_hits:
             return "No topic page matched."
         return "\n".join(
-            f"{svc.graph_store.graph.nodes[h.doc_id].get('path', h.doc_id)}: "
-            f"rrf={h.rrf_score:.4f}"
+            f"{svc.graph_store.graph.nodes[h.doc_id].get('path', h.doc_id)}: rrf={h.rrf_score:.4f}"
             for h in topic_hits
         )
 
@@ -301,8 +302,7 @@ def build_server(svc: Service) -> _ServerHandle:
         if not inbound:
             return f"No inbound wikilinks to {page!r}."
         return "\n".join(
-            f"{G.nodes[u].get('path', u)}: {G.nodes[u].get('title', u)}"
-            for u in inbound
+            f"{G.nodes[u].get('path', u)}: {G.nodes[u].get('title', u)}" for u in inbound
         )
 
     handlers = {

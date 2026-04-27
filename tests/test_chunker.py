@@ -1,17 +1,8 @@
-from vault_engine.chunker import chunk_page, Chunk
+from vault_engine.chunker import chunk_page
 
 
 def test_chunk_page_splits_on_h1_h2():
-    body = (
-        "# Top\n"
-        "Intro.\n"
-        "\n"
-        "## A\n"
-        "A body.\n"
-        "\n"
-        "## B\n"
-        "B body.\n"
-    )
+    body = "# Top\nIntro.\n\n## A\nA body.\n\n## B\nB body.\n"
     chunks = chunk_page("alpha", body)
     headings = [c.heading for c in chunks]
     assert headings == ["Top", "A", "B"]

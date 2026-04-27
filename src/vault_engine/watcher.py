@@ -4,6 +4,7 @@ Wraps watchdog. Emits per-file callbacks for markdown changes inside the vault,
 filtered to wiki/ and raw/. Debouncing is left to the consumer (the service
 layer in P2); here we just dedupe rapid duplicates within a small window.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

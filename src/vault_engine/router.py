@@ -3,6 +3,7 @@
 QueryMode / classify: cheap heuristic running on every query.
 Router: fans out to vector + topology channels, fuses via RRF.
 """
+
 from __future__ import annotations
 
 import re
@@ -28,13 +29,30 @@ class QueryMode(str, Enum):
 
 # Words that indicate a relational query.
 _RELATION_WORDS = {
-    "map", "maps", "mapped", "mapping",
-    "connect", "connects", "connected", "connection",
-    "link", "links", "linked",
-    "touch", "touches", "touching",
-    "depend", "depends", "depending", "dependency",
-    "relate", "related", "relation", "relationship",
-    "between", "across",
+    "map",
+    "maps",
+    "mapped",
+    "mapping",
+    "connect",
+    "connects",
+    "connected",
+    "connection",
+    "link",
+    "links",
+    "linked",
+    "touch",
+    "touches",
+    "touching",
+    "depend",
+    "depends",
+    "depending",
+    "dependency",
+    "relate",
+    "related",
+    "relation",
+    "relationship",
+    "between",
+    "across",
 }
 
 _RELATION_RE = re.compile(
@@ -68,6 +86,7 @@ def classify(query: str, known_titles: set[str]) -> QueryMode:
 # ---------------------------------------------------------------------------
 # P2: Dual-channel Router
 # ---------------------------------------------------------------------------
+
 
 class Router:
     """P2 dual-channel dispatcher: vector + topology, fused via RRF.
@@ -158,8 +177,7 @@ class Router:
         # VecStore.search returns list[VecHit]; each has .page_slug and .distance.
         raw = self.vec_store.search(emb, top_k=top_k)
         return [
-            RankedHit(doc_id=hit.page_slug, score=hit.distance, channel="vector")
-            for hit in raw
+            RankedHit(doc_id=hit.page_slug, score=hit.distance, channel="vector") for hit in raw
         ]
 
     def _infer_seed(self, vector_hits: list) -> str | None:

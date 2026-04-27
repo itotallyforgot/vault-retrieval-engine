@@ -1,4 +1,5 @@
 """Engine configuration: paths, model, chunking constants."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ def _default_cache_dir() -> Path:
     On Windows: %APPDATA%/vault-retrieval. On Unix: ~/.cache/vault-retrieval.
     """
     import os
+
     appdata = os.environ.get("APPDATA")
     if appdata:
         return Path(appdata) / "vault-retrieval"
@@ -29,9 +31,9 @@ class EngineConfig:
     graph_max_depth: int = 3
 
     # --- P2 additions ---
-    http_bind_addr: str = "127.0.0.1"      # default: loopback only
+    http_bind_addr: str = "127.0.0.1"  # default: loopback only
     http_port: int = 7842
-    http_token: str | None = None           # None disables HTTP auth gate (loopback-only)
+    http_token: str | None = None  # None disables HTTP auth gate (loopback-only)
     mcp_enabled: bool = False
     service_pidfile: Path | None = None
 

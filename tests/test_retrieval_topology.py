@@ -1,4 +1,5 @@
 """Tests for topology_walk retrieval channel."""
+
 from vault_engine.retrieval import topology_walk
 from vault_engine.stores.graph_store import GraphStore
 

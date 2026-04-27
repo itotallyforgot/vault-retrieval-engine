@@ -4,6 +4,7 @@ this module only constructs the app — binding lives in CLI.
 Auth: optional pre-shared HS256 token. If `secret is None`, all routes are
 open (only safe behind loopback or Tailscale on a trusted tailnet).
 """
+
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status

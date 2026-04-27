@@ -1,4 +1,5 @@
 """Read pages out of the vault. Parses frontmatter, body, classifies kind."""
+
 from __future__ import annotations
 
 import datetime
@@ -12,12 +13,12 @@ import frontmatter
 
 @dataclass
 class Page:
-    path: Path                       # absolute path on disk
-    slug: str                        # filename stem
-    kind: str                        # "topic" | "source" | "raw" | "other"
+    path: Path  # absolute path on disk
+    slug: str  # filename stem
+    kind: str  # "topic" | "source" | "raw" | "other"
     title: str
     aliases: list[str]
-    body: str                        # markdown body, no frontmatter
+    body: str  # markdown body, no frontmatter
     frontmatter: dict[str, Any] = field(default_factory=dict)
     wikilinks: list[str] = field(default_factory=list)  # filled by parse_wikilinks
 

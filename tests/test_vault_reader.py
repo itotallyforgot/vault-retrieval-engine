@@ -1,8 +1,12 @@
 from pathlib import Path
 
-import pytest
-
-from vault_engine.vault_reader import Page, read_page, slug_for_path
+from vault_engine.vault_reader import (
+    build_alias_map,
+    iter_pages,
+    parse_wikilinks,
+    read_page,
+    slug_for_path,
+)
 
 
 def test_read_page_parses_frontmatter_and_body(sample_vault: Path):
@@ -31,13 +35,6 @@ def test_slug_for_path_kebab_case(tmp_path: Path):
     p.parent.mkdir(parents=True)
     p.touch()
     assert slug_for_path(p) == "Some-Page"
-
-
-from vault_engine.vault_reader import (
-    iter_pages,
-    parse_wikilinks,
-    build_alias_map,
-)
 
 
 def test_parse_wikilinks_finds_targets():

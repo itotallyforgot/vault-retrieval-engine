@@ -5,6 +5,7 @@ Default k=60 per the original paper (Cormack 2009). Robust to score-distribution
 mismatch between channels (vector returns cosine [0,1], topology returns
 shortest-path-derived integers).
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

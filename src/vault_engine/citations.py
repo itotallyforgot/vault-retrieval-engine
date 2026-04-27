@@ -6,6 +6,7 @@ chain still surfaces.
 
 Also provides graph-based citation chain building via build_citation_chain.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -78,11 +79,7 @@ class CitationAssembler:
         seen.add(slug)
         page = read_page(path)
         raw_rel = page.frontmatter.get("raw_path")
-        raw_abs = (
-            str((self.cfg.vault_path / Path(str(raw_rel))).resolve())
-            if raw_rel
-            else None
-        )
+        raw_abs = str((self.cfg.vault_path / Path(str(raw_rel))).resolve()) if raw_rel else None
         out.append(
             Citation(
                 page_slug=slug,

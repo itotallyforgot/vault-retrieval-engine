@@ -5,6 +5,7 @@ Test/CI: MockEmbedder produces deterministic hash-based vectors.
 
 Both expose .encode(texts: list[str]) -> np.ndarray of shape (n, dim).
 """
+
 from __future__ import annotations
 
 import hashlib

@@ -61,7 +61,9 @@ def test_add_edge_default_edge_type_extracted(empty_graph_store):
 
 def test_add_edge_explicit_inferred(empty_graph_store):
     gs = empty_graph_store
-    gs.add_edge("topic-a", "topic-c", relation="semantic_similar", edge_type="INFERRED", confidence=0.82)
+    gs.add_edge(
+        "topic-a", "topic-c", relation="semantic_similar", edge_type="INFERRED", confidence=0.82
+    )
     edge = gs.graph.edges["topic-a", "topic-c"]
     assert edge["edge_type"] == "INFERRED"
     assert edge["confidence"] == 0.82
