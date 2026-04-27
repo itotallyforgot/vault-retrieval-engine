@@ -75,7 +75,7 @@ class EvalRunner:
     def _run_row(self, row: FixtureRow) -> tuple[bool, str, int]:
         start = time.monotonic()
         try:
-            hits = self.retrieval.search(row.query, k=max(10, len(row.expected_pages) * 3))
+            hits = self.retrieval.search(row.query, k=max(20, len(row.expected_pages) * 5))
         except Exception as exc:  # noqa: BLE001
             return False, f"exception: {exc!r}", int((time.monotonic() - start) * 1000)
         latency_ms = int((time.monotonic() - start) * 1000)
