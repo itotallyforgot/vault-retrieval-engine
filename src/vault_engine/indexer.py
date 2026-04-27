@@ -72,6 +72,7 @@ class Indexer:
             report.pages_processed += 1
 
         self.graph.rebuild(pages)
+        self.graph.finalize_build()
         return report
 
     def reindex_page(self, path: Path) -> IndexReport:
@@ -104,4 +105,5 @@ class Indexer:
 
         # Always rebuild the graph after a single-page change — cheap at vault scale.
         self.graph.rebuild(iter_pages(self.cfg.vault_path))
+        self.graph.finalize_build()
         return report

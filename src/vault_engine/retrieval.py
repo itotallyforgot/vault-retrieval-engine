@@ -11,6 +11,8 @@ from pathlib import Path
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import Embedder
 from vault_engine.indexer import Indexer
+from vault_engine.reranker import RankedHit
+from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecHit
 from vault_engine.vault_reader import iter_pages, read_page
 
@@ -154,3 +156,40 @@ def _retrieval_multi_hop(
 # Attach methods to Retrieval after class definition (keeps single-class import clean).
 Retrieval.graph_walk = _retrieval_graph_walk  # type: ignore[attr-defined]
 Retrieval.multi_hop = _retrieval_multi_hop    # type: ignore[attr-defined]
+
+
+def topology_walk(
+    graph_store: "GraphStore", seed: str, depth: int = 3
+) -> list[RankedHit]:
+    """BFS from seed over outbound edges; closer nodes rank higher.
+
+    Follows wikilink direction (page-mentions -> page-mentioned), so the walk
+    explores what the seed page references, not what references it. For
+    bidirectional reachability, callers should call this twice (once with the
+    graph reversed) and merge.
+
+    Score is 1/(distance+1). Filters out the seed itself. Returns RankedHit
+    list ordered best-first.
+    """
+    G = graph_store.graph
+    if seed not in G:
+        return []
+    distances: dict[str, int] = {seed: 0}
+    frontier: list[str] = [seed]
+    for d in range(1, depth + 1):
+        next_frontier: list[str] = []
+        for node in frontier:
+            for nbr in G.neighbors(node):
+                if nbr not in distances:
+                    distances[nbr] = d
+                    next_frontier.append(nbr)
+        frontier = next_frontier
+        if not frontier:
+            break
+    hits = [
+        RankedHit(doc_id=node, score=1.0 / (dist + 1), channel="topology")
+        for node, dist in distances.items()
+        if node != seed
+    ]
+    hits.sort(key=lambda h: h.score, reverse=True)
+    return hits

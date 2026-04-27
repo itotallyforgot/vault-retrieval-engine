@@ -11,13 +11,39 @@ from collections.abc import Iterable
 
 import networkx as nx
 
+from vault_engine.community import annotate_graph_with_communities
 from vault_engine.vault_reader import Page, build_alias_map
+
+
+ALLOWED_EDGE_TYPES: frozenset[str] = frozenset({"EXTRACTED", "INFERRED", "AMBIGUOUS"})
 
 
 class GraphStore:
     def __init__(self) -> None:
         self.graph: nx.DiGraph = nx.DiGraph()
         self._alias_map: dict[str, Page] = {}
+
+    def add_node(self, slug: str, **attrs: object) -> None:
+        """Add a node with arbitrary attributes. Thin pass-through to nx.DiGraph.add_node."""
+        self.graph.add_node(slug, **attrs)
+
+    def add_edge(
+        self,
+        src: str,
+        dst: str,
+        *,
+        relation: str,
+        edge_type: str = "EXTRACTED",
+        confidence: float | None = None,
+    ) -> None:
+        if edge_type not in ALLOWED_EDGE_TYPES:
+            raise ValueError(
+                f"edge_type must be one of {sorted(ALLOWED_EDGE_TYPES)}, got {edge_type!r}"
+            )
+        attrs: dict[str, object] = {"relation": relation, "edge_type": edge_type}
+        if confidence is not None:
+            attrs["confidence"] = float(confidence)
+        self.graph.add_edge(src, dst, **attrs)
 
     def rebuild(self, pages: list[Page]) -> None:
         self.graph = nx.DiGraph()
@@ -38,7 +64,7 @@ class GraphStore:
             for link in page.wikilinks:
                 target_slug = self._resolve(link)
                 if target_slug and target_slug != page.slug:
-                    self.graph.add_edge(page.slug, target_slug, kind="wikilink")
+                    self.add_edge(page.slug, target_slug, relation="wikilink")
 
     def _resolve(self, name: str) -> str | None:
         page = self._alias_map.get(name.lower())
@@ -83,3 +109,7 @@ class GraphStore:
 
     def neighbors(self, slug: str) -> list[str]:
         return list(self.graph.successors(slug)) if self.graph.has_node(slug) else []
+
+    def finalize_build(self) -> None:
+        """Call after all add_node / add_edge are done. Annotates communities on nodes."""
+        annotate_graph_with_communities(self.graph)
