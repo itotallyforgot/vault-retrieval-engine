@@ -167,6 +167,39 @@ class VecStore:
         self._conn.commit()
         return len(rowids)
 
+    def delete_chunk(self, page_slug: str, chunk_idx: int) -> bool:
+        """Drop a single chunk. Returns True if a row was removed, False if absent."""
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "SELECT rowid FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
+            (page_slug, chunk_idx),
+        )
+        row = cur.fetchone()
+        if row is None:
+            return False
+        rowid = row[0]
+        self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rowid,))
+        self._conn.execute(
+            "DELETE FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
+            (page_slug, chunk_idx),
+        )
+        self._conn.commit()
+        return True
+
+    def get_checksums(self, page_slug: str) -> dict[int, str]:
+        """Return {chunk_idx: checksum} for all chunks belonging to page_slug.
+
+        The Indexer uses this to identify which chunks actually need re-encoding
+        before calling the (expensive) embedder. Empty dict if the page is
+        unknown.
+        """
+        assert self._conn is not None
+        cur = self._conn.execute(
+            "SELECT chunk_idx, checksum FROM chunk_meta WHERE page_slug=?",
+            (page_slug,),
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+
     def search(self, query_vec: np.ndarray, top_k: int = 10) -> list[VecHit]:
         assert self._conn is not None
         blob = self._serialize(query_vec)
