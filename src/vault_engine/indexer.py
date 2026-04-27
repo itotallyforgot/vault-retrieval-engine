@@ -45,10 +45,50 @@ class Indexer:
             self.vec.close()
             self._opened = False
 
+    def _index_page_chunks(
+        self,
+        page_slug: str,
+        chunks: list,
+        report: IndexReport,
+    ) -> None:
+        """Encode + upsert ONLY chunks whose checksum differs from what's stored.
+
+        This is the P3 perf-critical path. Pre-P3, embedder.encode() ran on every
+        chunk in every page on every rebuild — ~10 minutes against mxbai on a
+        warm cache because encoding ran *before* the checksum-skip check inside
+        upsert. Now we ask the vec store what's already there, diff against the
+        new chunk set, and only encode what actually changed. Chunks that
+        disappeared from the new set (e.g. the page lost a section) are
+        dropped explicitly so search doesn't surface stale rows.
+        """
+        existing = self.vec.get_checksums(page_slug)
+        new_idxs = {c.idx for c in chunks}
+
+        # Drop chunks that no longer exist in the new chunk set.
+        for old_idx in existing.keys() - new_idxs:
+            self.vec.delete_chunk(page_slug, old_idx)
+
+        changed_chunks = [c for c in chunks if existing.get(c.idx) != c.checksum]
+        if changed_chunks:
+            vectors = self.embedder.encode([c.text for c in changed_chunks])
+            for chunk, vec in zip(changed_chunks, vectors, strict=True):
+                self.vec.upsert(
+                    page_slug=chunk.page_slug,
+                    chunk_idx=chunk.idx,
+                    content=chunk.text,
+                    checksum=chunk.checksum,
+                    embedding=vec,
+                )
+
+        report.chunks_changed += len(changed_chunks)
+        report.chunks_unchanged += len(chunks) - len(changed_chunks)
+        report.chunks_indexed += len(chunks)
+
     def rebuild(self) -> IndexReport:
         """Re-read every page and re-index from scratch.
 
-        Vec store: incremental — checksum-skip unchanged chunks.
+        Vec store: incremental — checksum-skip unchanged chunks WITHOUT
+        re-encoding (see _index_page_chunks).
         Graph: full rebuild — cheap at vault scale.
         """
         report = IndexReport()
@@ -56,20 +96,7 @@ class Indexer:
         for page in pages:
             chunks = chunk_page(page.slug, page.body)
             if chunks:
-                vectors = self.embedder.encode([c.text for c in chunks])
-                for chunk, vec in zip(chunks, vectors, strict=True):
-                    changed = self.vec.upsert(
-                        page_slug=chunk.page_slug,
-                        chunk_idx=chunk.idx,
-                        content=chunk.text,
-                        checksum=chunk.checksum,
-                        embedding=vec,
-                    )
-                    if changed:
-                        report.chunks_changed += 1
-                    else:
-                        report.chunks_unchanged += 1
-                    report.chunks_indexed += 1
+                self._index_page_chunks(page.slug, chunks, report)
             report.pages_processed += 1
 
         self.graph.rebuild(pages)
@@ -77,7 +104,11 @@ class Indexer:
         return report
 
     def reindex_page(self, path: Path) -> IndexReport:
-        """Re-index a single page after a file change. Rebuilds graph."""
+        """Re-index a single page after a file change. Rebuilds graph.
+
+        Reuses the rebuild() encode-skip path, so frontmatter-only edits
+        (or any change that leaves body chunks identical) are essentially free.
+        """
         report = IndexReport()
         if not path.exists():
             # Deleted file: drop chunks and rebuild graph from current vault state.
@@ -88,20 +119,11 @@ class Indexer:
             page = read_page(path)
             page.wikilinks = parse_wikilinks(page.body)
             chunks = chunk_page(page.slug, page.body)
-            # Drop all prior chunks for this page; the new chunk set replaces them.
-            self.vec.delete_page(page.slug)
             if chunks:
-                vectors = self.embedder.encode([c.text for c in chunks])
-                for chunk, vec in zip(chunks, vectors, strict=True):
-                    self.vec.upsert(
-                        page_slug=chunk.page_slug,
-                        chunk_idx=chunk.idx,
-                        content=chunk.text,
-                        checksum=chunk.checksum,
-                        embedding=vec,
-                    )
-                    report.chunks_changed += 1
-                    report.chunks_indexed += 1
+                self._index_page_chunks(page.slug, chunks, report)
+            else:
+                # Empty page (no chunks): drop everything for this slug.
+                self.vec.delete_page(page.slug)
             report.pages_processed = 1
 
         # Always rebuild the graph after a single-page change — cheap at vault scale.

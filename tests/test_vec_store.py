@@ -87,6 +87,38 @@ def test_vec_store_rejects_mismatched_dim(tmp_path: Path):
         bad.open()
 
 
+def test_vec_store_get_checksums_for_page(tmp_path: Path):
+    db = tmp_path / "v.db"
+    store = VecStore(db_path=db, dim=8, model_name="m1")
+    store.open()
+    try:
+        v = np.ones(8, dtype=np.float32)
+        store.upsert("p", 0, "a", "csum-a", v)
+        store.upsert("p", 1, "b", "csum-b", v)
+        store.upsert("q", 0, "c", "csum-c", v)
+        cs = store.get_checksums("p")
+        assert cs == {0: "csum-a", 1: "csum-b"}
+        assert store.get_checksums("missing") == {}
+    finally:
+        store.close()
+
+
+def test_vec_store_delete_chunk_removes_only_that_chunk(tmp_path: Path):
+    db = tmp_path / "v.db"
+    store = VecStore(db_path=db, dim=8, model_name="m1")
+    store.open()
+    try:
+        v = np.ones(8, dtype=np.float32)
+        store.upsert("p", 0, "a", "1", v)
+        store.upsert("p", 1, "b", "2", v)
+        assert store.delete_chunk("p", 0) is True
+        assert store.get_checksums("p") == {1: "2"}
+        # Idempotent: deleting again is a no-op.
+        assert store.delete_chunk("p", 0) is False
+    finally:
+        store.close()
+
+
 def test_vec_store_force_reset_clears_state(tmp_path: Path):
     db = tmp_path / "v.db"
     store = VecStore(db_path=db, dim=8, model_name="m1")
