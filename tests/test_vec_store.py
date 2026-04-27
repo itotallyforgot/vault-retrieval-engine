@@ -119,6 +119,31 @@ def test_vec_store_delete_chunk_removes_only_that_chunk(tmp_path: Path):
         store.close()
 
 
+def test_vec_store_iter_chunks_for_page_returns_vectors(tmp_path: Path):
+    db = tmp_path / "v.db"
+    store = VecStore(db_path=db, dim=4, model_name="m1")
+    store.open()
+    try:
+        v0 = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        v1 = np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float32)
+        v_other = np.array([0.0, 0.0, 1.0, 0.0], dtype=np.float32)
+        store.upsert("p", 0, "a", "csum-a", v0)
+        store.upsert("p", 1, "b", "csum-b", v1)
+        store.upsert("q", 0, "c", "csum-c", v_other)
+        rows = store.iter_chunks_for_page("p")
+        assert len(rows) == 2
+        idxs = sorted(r[0] for r in rows)
+        assert idxs == [0, 1]
+        # Round-trip preserved through float32 (de)serialization.
+        by_idx = {idx: vec for idx, vec in rows}
+        np.testing.assert_allclose(by_idx[0], v0)
+        np.testing.assert_allclose(by_idx[1], v1)
+        # Unknown page → empty.
+        assert store.iter_chunks_for_page("missing") == []
+    finally:
+        store.close()
+
+
 def test_vec_store_force_reset_clears_state(tmp_path: Path):
     db = tmp_path / "v.db"
     store = VecStore(db_path=db, dim=8, model_name="m1")

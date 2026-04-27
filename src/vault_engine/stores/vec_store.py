@@ -186,6 +186,31 @@ class VecStore:
         self._conn.commit()
         return True
 
+    def iter_chunks_for_page(self, page_slug: str) -> list[tuple[int, np.ndarray]]:
+        """Return [(chunk_idx, vector), ...] for every chunk belonging to page_slug.
+
+        Used by the inference layer to mean-pool chunks into a page-level
+        vector for semantic-similarity edge inference. Empty list if the page
+        is unknown.
+        """
+        assert self._conn is not None
+        cur = self._conn.execute(
+            """
+            SELECT chunk_idx, embedding
+            FROM chunks
+            WHERE page_slug=?
+            ORDER BY chunk_idx
+            """,
+            (page_slug,),
+        )
+        out: list[tuple[int, np.ndarray]] = []
+        for row in cur.fetchall():
+            chunk_idx = row[0]
+            blob = row[1]
+            vec = np.frombuffer(blob, dtype=np.float32).copy()
+            out.append((chunk_idx, vec))
+        return out
+
     def get_checksums(self, page_slug: str) -> dict[int, str]:
         """Return {chunk_idx: checksum} for all chunks belonging to page_slug.
 

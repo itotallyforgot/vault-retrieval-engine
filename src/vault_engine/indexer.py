@@ -8,6 +8,7 @@ from pathlib import Path
 from vault_engine.chunker import chunk_page
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import Embedder
+from vault_engine.inference import add_similarity_edges
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecStore
 from vault_engine.vault_reader import iter_pages, parse_wikilinks, read_page
@@ -100,6 +101,13 @@ class Indexer:
             report.pages_processed += 1
 
         self.graph.rebuild(pages)
+        # P3 #6: enrich with INFERRED similarity edges before community
+        # detection so Louvain sees the full graph.
+        add_similarity_edges(
+            self.graph,
+            self.vec,
+            threshold=self.cfg.inferred_edge_threshold,
+        )
         self.graph.finalize_build()
         return report
 
@@ -128,5 +136,10 @@ class Indexer:
 
         # Always rebuild the graph after a single-page change — cheap at vault scale.
         self.graph.rebuild(iter_pages(self.cfg.vault_path))
+        add_similarity_edges(
+            self.graph,
+            self.vec,
+            threshold=self.cfg.inferred_edge_threshold,
+        )
         self.graph.finalize_build()
         return report
