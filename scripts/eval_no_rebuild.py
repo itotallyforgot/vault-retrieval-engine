@@ -12,6 +12,7 @@ Usage:
         --vault E:/Projects/second-brain \\
         --fixtures E:/Projects/second-brain/_ops/eval/retrieval-fixtures.jsonl
 """
+
 from __future__ import annotations
 
 import argparse

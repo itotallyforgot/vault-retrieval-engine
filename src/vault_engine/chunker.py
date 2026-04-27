@@ -5,6 +5,7 @@ heading line and its body until the next header at the same or higher level.
 Chunks below a min size are merged into the next chunk; chunks above the
 max size are split on paragraph boundaries.
 """
+
 from __future__ import annotations
 
 import hashlib

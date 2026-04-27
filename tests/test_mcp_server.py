@@ -24,8 +24,15 @@ def test_mcp_server_lists_expected_tools(sample_vault, tmp_path):
         server = build_server(svc)
         tools = asyncio.run(server.list_tools_handler())
         names = {t.name for t in tools}
-        assert {"query_graph", "get_node", "get_neighbors", "get_community",
-                "god_nodes", "graph_stats", "shortest_path"} <= names
+        assert {
+            "query_graph",
+            "get_node",
+            "get_neighbors",
+            "get_community",
+            "god_nodes",
+            "graph_stats",
+            "shortest_path",
+        } <= names
         assert {"find_topic_page", "find_unlinked_references", "get_linked_references"} <= names
     finally:
         svc.stop()

@@ -3,6 +3,7 @@
 Composes vec store + graph store + vault filesystem. Stateless aside from
 references to indexer.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -91,7 +92,7 @@ class Retrieval:
                 alias_to_slug.setdefault(name.lower(), p.slug)
         for p in pages:
             body_lower = p.body.lower()
-            linked = {l.lower() for l in p.wikilinks}
+            linked = {wl.lower() for wl in p.wikilinks}
             for alias, target_slug in alias_to_slug.items():
                 if target_slug == p.slug:
                     continue
@@ -99,6 +100,7 @@ class Retrieval:
                     continue
                 # Word-boundary match.
                 import re
+
                 if re.search(rf"\b{re.escape(alias)}\b", body_lower):
                     report.unlinked_mentions.append((p.slug, alias))
         return report
@@ -119,6 +121,7 @@ class MultiHopResult:
 
 class _RetrievalGraphMixin:
     """Inline mixin to keep graph methods grouped — methods attached below."""
+
     pass
 
 
@@ -146,21 +149,16 @@ def _retrieval_multi_hop(
             seed_slugs.append(h.page_slug)
     all_paths = self.indexer.graph.walk(seeds=seed_slugs, max_depth=depth)
     seed_set = set(seed_slugs)
-    filtered = [
-        p for p in all_paths
-        if len(seed_set.intersection(p)) >= min_seeds_touched
-    ]
+    filtered = [p for p in all_paths if len(seed_set.intersection(p)) >= min_seeds_touched]
     return MultiHopResult(seeds=seed_slugs, paths=filtered)
 
 
 # Attach methods to Retrieval after class definition (keeps single-class import clean).
 Retrieval.graph_walk = _retrieval_graph_walk  # type: ignore[attr-defined]
-Retrieval.multi_hop = _retrieval_multi_hop    # type: ignore[attr-defined]
+Retrieval.multi_hop = _retrieval_multi_hop  # type: ignore[attr-defined]
 
 
-def topology_walk(
-    graph_store: "GraphStore", seed: str, depth: int = 3
-) -> list[RankedHit]:
+def topology_walk(graph_store: "GraphStore", seed: str, depth: int = 3) -> list[RankedHit]:
     """BFS from seed over outbound edges; closer nodes rank higher.
 
     Follows wikilink direction (page-mentions -> page-mentioned), so the walk

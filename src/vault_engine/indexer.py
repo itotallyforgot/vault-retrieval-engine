@@ -1,4 +1,5 @@
 """Index orchestration: chunks every page, embeds, upserts vec store, rebuilds graph."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

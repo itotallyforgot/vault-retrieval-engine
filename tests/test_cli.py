@@ -16,8 +16,10 @@ def test_cli_status_runs_against_sample_vault(sample_vault, tmp_path):
     result = runner.invoke(
         app,
         [
-            "--vault", str(sample_vault),
-            "--cache", str(tmp_path / "cache"),
+            "--vault",
+            str(sample_vault),
+            "--cache",
+            str(tmp_path / "cache"),
             "--mock-embedder",
             "status",
         ],

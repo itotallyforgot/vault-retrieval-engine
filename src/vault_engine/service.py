@@ -1,4 +1,5 @@
 """Long-running engine wrapper. Holds the indexer, watcher, router, stores."""
+
 from __future__ import annotations
 
 import logging

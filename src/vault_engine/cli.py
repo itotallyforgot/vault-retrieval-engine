@@ -1,4 +1,5 @@
 """vault-engine CLI."""
+
 from __future__ import annotations
 
 import json
@@ -77,6 +78,7 @@ def status() -> None:
     idx = _open_indexer()
     try:
         from vault_engine.vault_reader import iter_pages
+
         pages = iter_pages(cfg.vault_path)
         console.print(f"[bold]vault[/bold]: {cfg.vault_path}")
         console.print(f"[bold]cache[/bold]: {cfg.cache_dir}")
@@ -119,10 +121,7 @@ def search(query: str = typer.Argument(...), k: int = typer.Option(10, "-k")) ->
         idx.rebuild()  # ensures fresh state when run ad-hoc; cheap at vault scale
         r = Retrieval(cfg=idx.cfg, indexer=idx, embedder=idx.embedder)
         for hit in r.search(query, k=k):
-            console.print(
-                f"[cyan]{hit.page_slug}[/cyan] "
-                f"#{hit.chunk_idx} dist={hit.distance:.4f}"
-            )
+            console.print(f"[cyan]{hit.page_slug}[/cyan] #{hit.chunk_idx} dist={hit.distance:.4f}")
             console.print(hit.content[:200].replace("\n", " "))
             console.print("---")
     finally:
@@ -161,14 +160,14 @@ def source(slug: str = typer.Argument(...)) -> None:
 
 @app.command(name="eval")
 def eval_cmd(
-    fixtures: Path = typer.Option(
-        ..., "--fixtures", help="Path to retrieval-fixtures.jsonl."
-    ),
+    fixtures: Path = typer.Option(..., "--fixtures", help="Path to retrieval-fixtures.jsonl."),
     embedder: str = typer.Option(
         "default", "--embedder", help="Embedder to use: 'default' (SentenceTransformer) or 'mock'."
     ),
     threshold: float = typer.Option(
-        None, "--threshold", help="Pass-rate threshold (0.0–1.0). Exit code 1 if passed/total < threshold."
+        None,
+        "--threshold",
+        help="Pass-rate threshold (0.0–1.0). Exit code 1 if passed/total < threshold.",
     ),
 ) -> None:
     """Run the eval fixture suite against the engine."""
@@ -200,7 +199,9 @@ def eval_cmd(
         if threshold is not None and report.total > 0:
             pass_rate = report.passed / report.total
             if pass_rate < threshold:
-                console.print(f"[red]FAIL: pass-rate {pass_rate:.2%} < threshold {threshold:.2%}[/red]")
+                console.print(
+                    f"[red]FAIL: pass-rate {pass_rate:.2%} < threshold {threshold:.2%}[/red]"
+                )
                 raise typer.Exit(code=1)
 
         # Fail if any tests failed (unless threshold check passed above)
@@ -298,8 +299,7 @@ def hook_install(
     new_entries = settings_addition["hooks"]["PreToolUse"]
     for new_entry in new_entries:
         if not any(
-            e.get("matcher") == new_entry["matcher"]
-            and e.get("command") == new_entry["command"]
+            e.get("matcher") == new_entry["matcher"] and e.get("command") == new_entry["command"]
             for e in pre_tool
         ):
             pre_tool.append(new_entry)

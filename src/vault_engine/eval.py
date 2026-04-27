@@ -3,6 +3,7 @@
 Reads JSONL fixtures, runs each against the retrieval layer, asserts that
 expected pages appear and that latency is within budget.
 """
+
 from __future__ import annotations
 
 import json

@@ -5,6 +5,7 @@ Nodes  = page slugs (one per page). Aliases are NOT separate nodes; they map
 Edges  = wikilink references (source page -> target page). Anchor / display
          portions are stripped before resolution.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable

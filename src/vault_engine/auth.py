@@ -13,6 +13,7 @@ without those claims (the default for `secrets.token_urlsafe(32)` + a single
 `jwt.encode({'sub':'...'}, secret)` call) are effectively long-lived. If callers
 add `exp`, they must rotate the token before it lapses or verification will fail.
 """
+
 from __future__ import annotations
 
 import jwt

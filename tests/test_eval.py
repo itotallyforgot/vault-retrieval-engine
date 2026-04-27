@@ -32,14 +32,17 @@ def test_eval_runner_passes_for_seeded_lookup(sample_vault: Path, tmp_path: Path
         r = Retrieval(cfg=cfg, indexer=idx, embedder=idx.embedder)
         fixture_path = tmp_path / "fix.jsonl"
         fixture_path.write_text(
-            json.dumps({
-                "id": "lookup-alpha",
-                "query": "alpha",
-                "expected_pages": ["alpha"],
-                "min_citation_depth": 1,
-                "mode": "lookup",
-                "max_latency_ms": 5000,
-            }) + "\n"
+            json.dumps(
+                {
+                    "id": "lookup-alpha",
+                    "query": "alpha",
+                    "expected_pages": ["alpha"],
+                    "min_citation_depth": 1,
+                    "mode": "lookup",
+                    "max_latency_ms": 5000,
+                }
+            )
+            + "\n"
         )
         runner = EvalRunner(cfg=cfg, retrieval=r)
         report = runner.run(fixture_path)
@@ -60,14 +63,17 @@ def test_eval_runner_records_failure(sample_vault: Path, tmp_path: Path):
         r = Retrieval(cfg=cfg, indexer=idx, embedder=idx.embedder)
         fixture_path = tmp_path / "fix.jsonl"
         fixture_path.write_text(
-            json.dumps({
-                "id": "lookup-missing",
-                "query": "alpha",
-                "expected_pages": ["nonexistent-page"],
-                "min_citation_depth": 1,
-                "mode": "lookup",
-                "max_latency_ms": 5000,
-            }) + "\n"
+            json.dumps(
+                {
+                    "id": "lookup-missing",
+                    "query": "alpha",
+                    "expected_pages": ["nonexistent-page"],
+                    "min_citation_depth": 1,
+                    "mode": "lookup",
+                    "max_latency_ms": 5000,
+                }
+            )
+            + "\n"
         )
         runner = EvalRunner(cfg=cfg, retrieval=r)
         report = runner.run(fixture_path)
