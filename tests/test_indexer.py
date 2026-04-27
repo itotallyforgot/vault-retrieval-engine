@@ -155,6 +155,61 @@ def test_indexer_reindex_page_preserves_unchanged_chunks(sample_vault: Path, tmp
         idx.close()
 
 
+def test_indexer_rebuild_emits_inferred_edges(sample_vault: Path, tmp_path: Path):
+    """rebuild() should populate INFERRED edges between semantically close pages
+    that aren't already connected by an EXTRACTED wikilink. Threshold is read
+    from EngineConfig.inferred_edge_threshold.
+    """
+    cfg = EngineConfig(
+        vault_path=sample_vault,
+        cache_dir=tmp_path / "cache",
+        # Mock embedder produces wide-spread vectors; pick a low threshold so
+        # we exercise the INFERRED path on the tiny sample vault.
+        inferred_edge_threshold=0.3,
+    )
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        edge_types = {
+            (s, d): data.get("edge_type") for s, d, data in idx.graph.graph.edges(data=True)
+        }
+        # The fixture's alpha→beta wikilink must remain EXTRACTED.
+        assert edge_types[("alpha", "beta")] == "EXTRACTED"
+        # At least one INFERRED edge must be present.
+        assert "INFERRED" in edge_types.values()
+        # All INFERRED edges must carry a confidence in [threshold, 1.0].
+        for (s, d), data in (
+            ((s, d), idx.graph.graph.edges[s, d])
+            for (s, d), t in edge_types.items()
+            if t == "INFERRED"
+        ):
+            assert cfg.inferred_edge_threshold <= float(data["confidence"]) <= 1.0
+    finally:
+        idx.close()
+
+
+def test_indexer_inferred_edges_never_overwrite_extracted(sample_vault: Path, tmp_path: Path):
+    """If alpha→beta is already EXTRACTED via wikilink, the INFERRED pass must
+    not downgrade it even at threshold 0.0."""
+    cfg = EngineConfig(
+        vault_path=sample_vault,
+        cache_dir=tmp_path / "cache",
+        inferred_edge_threshold=0.0,
+    )
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        ab = idx.graph.graph.edges["alpha", "beta"]
+        assert ab["edge_type"] == "EXTRACTED"
+        assert ab["relation"] == "wikilink"
+    finally:
+        idx.close()
+
+
 def test_indexer_reindex_single_page(sample_vault: Path, tmp_path: Path):
     cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)

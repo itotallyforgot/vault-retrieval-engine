@@ -29,6 +29,18 @@ class EngineConfig:
     chunk_min_tokens: int = 32
     semantic_top_k: int = 10
     graph_max_depth: int = 3
+    # Cosine-similarity floor for INFERRED graph edges (P3 #6). Pairs of pages
+    # whose mean-pooled chunk vectors meet or exceed this threshold get a
+    # symmetric INFERRED edge with confidence = similarity. EXTRACTED wikilink
+    # edges are never overwritten regardless of threshold.
+    #
+    # Default is 0.85 based on empirical real-vault smoke (mxbai-embed-large,
+    # 339 pages): 0.80 emits 7058 edges (62% of which sit in [0.80, 0.83) and
+    # represent weak same-domain co-occurrence), 0.85 emits 1319 (avg 4/node),
+    # 0.90 emits 200 (high precision, low recall). 0.85 is the elbow where
+    # noise drops sharply but topical neighbors are still surfaced. mxbai
+    # vectors are L2-normalised so absolute scores skew high.
+    inferred_edge_threshold: float = 0.85
 
     # --- P2 additions ---
     http_bind_addr: str = "127.0.0.1"  # default: loopback only
