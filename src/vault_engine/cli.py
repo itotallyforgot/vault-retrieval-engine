@@ -39,7 +39,7 @@ def main(
     # `hook` has no vault state. `serve`/`mcp` construct their own EngineConfig
     # from their own --vault flag so they can run as long-lived processes.
     # `eval` manages its own embedder selection, but still needs vault setup.
-    if ctx.invoked_subcommand in ("hook", "serve", "mcp"):
+    if ctx.invoked_subcommand in ("hook", "serve", "mcp", "add"):
         return
     if vault is None:
         typer.echo("Error: --vault is required for this command.", err=True)
@@ -249,6 +249,51 @@ def mcp(
     svc = Service(cfg)
     svc.start()
     serve_stdio(svc)
+
+
+@app.command()
+def add(
+    url: str = typer.Argument(..., help="URL of the article to fetch."),
+    vault: Path = typer.Option(..., "--vault", help="Path to vault root."),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace an existing raw/<slug>.md instead of failing.",
+    ),
+    title: str | None = typer.Option(
+        None,
+        "--title",
+        help="Override the auto-detected title (slug is derived from this).",
+    ),
+) -> None:
+    """One-shot fetch + extract a URL into <vault>/raw/<slug>.md (P3 #5).
+
+    The file lands with `ingested: false` frontmatter, ready for
+    `/vault ingest <path>` (or batch ingest) to merge into the wiki. The
+    engine deliberately does NOT touch wiki/ — splitting scrape from
+    synthesis keeps engine work deterministic and lets the user review
+    every fetch before it shapes topic pages.
+    """
+    from vault_engine.url_ingester import add_url
+
+    if not vault.exists():
+        typer.echo(f"Error: vault path does not exist: {vault}", err=True)
+        raise typer.Exit(2)
+
+    try:
+        path = add_url(
+            vault_path=vault,
+            url=url,
+            overwrite=overwrite,
+            title_override=title,
+        )
+    except FileExistsError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from e
+
+    rel = path.relative_to(vault) if path.is_absolute() else path
+    typer.echo(f"Wrote {rel}")
+    typer.echo("Next: run `/vault ingest <path>` (or batch ingest) to merge into the wiki.")
 
 
 # ---------------------------------------------------------------------------
