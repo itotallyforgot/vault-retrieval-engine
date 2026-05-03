@@ -22,6 +22,17 @@
     Directory for stdout/stderr log files. Defaults to
     `$env:APPDATA\vault-retrieval\service-logs`.
 
+.PARAMETER CacheDir
+    Cache directory for embeddings.db + graph.pkl. Pass an absolute path
+    that is readable + writable by `LocalSystem` (the service account) and
+    by your user account (so `vault-engine reindex` can pre-warm it). The
+    default `%APPDATA%\vault-retrieval` resolves to a different folder per
+    account — `LocalSystem`'s `%APPDATA%` is
+    `C:\Windows\System32\config\systemprofile\AppData\Roaming`, which is
+    not the same cache your interactive shell uses. Without this param the
+    service does a cold rebuild on first start. A shared E:\ path
+    (e.g. `E:\Projects\.cache\vault-retrieval`) avoids that.
+
 .PARAMETER VaultEngineExe
     Full path to `vault-engine.exe`. Auto-detected from PATH if omitted.
 
@@ -56,6 +67,8 @@ param(
     [string]$VaultPath,
 
     [string]$ServiceName = 'vault-engine',
+
+    [string]$CacheDir,
 
     [string]$LogDir,
 
@@ -126,7 +139,16 @@ service. Either:
 }
 
 # --- Service config -----------------------------------------------------
-$AppParameters = "--vault `"$VaultPath`" serve"
+if ($CacheDir) {
+    $CacheDir = (Resolve-Path -LiteralPath $CacheDir -ErrorAction SilentlyContinue).Path
+    if (-not $CacheDir -or -not (Test-Path $CacheDir)) {
+        throw "CacheDir does not exist: $CacheDir (create it first; the service account must be able to read+write it)"
+    }
+    $AppParameters = "serve --vault `"$VaultPath`" --cache `"$CacheDir`""
+} else {
+    Write-Warning "No -CacheDir passed. Service will use LocalSystem's %APPDATA% (cold rebuild on first start). Pass -CacheDir to share cache with your user account."
+    $AppParameters = "serve --vault `"$VaultPath`""
+}
 $StdoutLog = Join-Path $LogDir "$ServiceName-stdout.log"
 $StderrLog = Join-Path $LogDir "$ServiceName-stderr.log"
 
