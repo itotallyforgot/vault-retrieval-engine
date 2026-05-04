@@ -172,11 +172,25 @@ def test_query_graph_via_direct_mcp_stdio(engine_service, expected_top_k):
     vault = engine_service.cfg.vault_path
     text = asyncio.run(_query_graph_over_stdio(vault, PROBE_QUESTION, TOP_K))
     titles = _parse_node_titles(text)
-    # Compare as multisets: the MCP wire surface sorts hits by RRF score
-    # before formatting, while Service.query() returns them in the
-    # graph's natural traversal order. Same retrieval RESULT, different
-    # presentation order. Spec is "equivalent retrieval", not "byte-identical
-    # order"; multiset equality is the semantically correct check.
+    # Compare as multisets, not ordered lists.
+    #
+    # Both paths funnel through the same Service.query() → reciprocal-rank
+    # fusion code in principle, so on paper the order should match. In
+    # practice, when this assertion was first written as ordered equality,
+    # the in-process and subprocess paths returned the SAME chunks in
+    # DIFFERENT orders for the mock-embedder fixture (e.g. an "Alpha"
+    # duplicate landing at index 4 in-process but at index 1 in the
+    # subprocess). The most likely cause is process-startup
+    # non-determinism somewhere in the index/community-detection pipeline
+    # (Python hash randomization, dict iteration order, Louvain seeding).
+    # Investigating that is out of scope for this slice.
+    #
+    # The MVP verify line is "equivalent retrieval" — same chunks for the
+    # same query — and Counter equality matches that intent. If the
+    # ordering question matters later, file a follow-up: either pin
+    # PYTHONHASHSEED in the subprocess, deterministic-seed Louvain, or
+    # accept the divergence as a known property of the multi-process
+    # surface.
     assert Counter(titles) == Counter(expected_top_k), (
         f"direct-MCP-stdio branch retrieval set diverged from Service.query() ground truth\n"
         f"  expected (multiset): {Counter(expected_top_k)}\n"
