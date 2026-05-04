@@ -70,5 +70,5 @@ target-version = "py312"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = ["src", "tests"]
-extraPaths = ["src"]
+include = ["src", "tests", "tools"]
+extraPaths = ["src", "tools"]
