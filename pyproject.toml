@@ -31,6 +31,11 @@ dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
     "ruff>=0.7",
+    # Verify-harness deps: Pydantic-AI talks to Ollama via the OpenAI-compatible
+    # endpoint (no dedicated `ollama` extra exists; the `openai` extra pulls in
+    # the http client used for `http://localhost:11434/v1`). The `mcp` extra
+    # provides the MCPServerStdio client used to attach engine MCP as a tool.
+    "pydantic-ai-slim[openai,mcp]>=0.0.50",
 ]
 
 [tool.uv]
@@ -55,6 +60,7 @@ testpaths = ["tests"]
 addopts = "-q --strict-markers"
 markers = [
     "integration: requires real embedding model and GPU",
+    "mcp_connectivity: cross-harness MCP connectivity verify (Ollama + Codex env-gated)",
 ]
 
 [tool.ruff]
@@ -64,5 +70,5 @@ target-version = "py312"
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
-include = ["src", "tests"]
-extraPaths = ["src"]
+include = ["src", "tests", "tools"]
+extraPaths = ["src", "tools"]

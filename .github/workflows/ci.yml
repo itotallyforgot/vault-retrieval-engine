@@ -60,6 +60,13 @@ jobs:
         run: uv sync --group dev
       - name: pytest
         run: uv run pytest -q --tb=short
+      - name: pytest (mcp_connectivity, env-gated)
+        # Cross-harness MCP connectivity suite. Only the direct-MCP-stdio
+        # branch runs in CI; Ollama + Codex branches skip cleanly because
+        # neither the daemon nor the binary is installed on the runner.
+        # Local devs run the same command with both available for full
+        # parity coverage.
+        run: uv run pytest -q --tb=short -m mcp_connectivity
 
   ruff:
     runs-on: ubuntu-latest
