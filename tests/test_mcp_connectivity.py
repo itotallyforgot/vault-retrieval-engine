@@ -143,10 +143,16 @@ async def _query_graph_over_stdio(vault: Path, question: str, top_k: int) -> str
     )
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
-            await session.initialize()
-            result = await session.call_tool(
-                "query_graph",
-                arguments={"question": question, "top_k": top_k},
+            # Timeouts guard against future engine changes that introduce
+            # a slow init or tool path; without them a hang would only
+            # surface at the CI job-level timeout.
+            await asyncio.wait_for(session.initialize(), timeout=30)
+            result = await asyncio.wait_for(
+                session.call_tool(
+                    "query_graph",
+                    arguments={"question": question, "top_k": top_k},
+                ),
+                timeout=30,
             )
     assert result.content, "MCP query_graph returned empty content"
     first = result.content[0]
