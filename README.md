@@ -2,7 +2,7 @@
 
 Local semantic retrieval engine over personal markdown vaults. No external API. Citation chains for auditable retrieval.
 
-A plug-in for second-brain-template-shaped vaults — overlays retrieval, semantic search, and citation chains onto a vault that runs standalone without it. Works with any markdown vault that uses wikilinks; the vault remains the source of truth and the engine is best-effort enrichment.
+> **This is a plug-in.** Your vault is the source of truth and runs without it — Obsidian alone is enough to read, edit, and sync. The engine overlays retrieval, semantic search, citation chains, and a `/vault query` skill onto a vault when installed, and degrades to a graceful no-op when uninstalled. Designed for second-brain-template-shaped vaults; works with any markdown vault that uses wikilinks.
 
 ## Why
 
@@ -83,6 +83,25 @@ uv run vault-engine --vault tests/fixtures/sample_vault eval \
 ```
 
 The `mock` embedder is fast and deterministic for iteration. Switch to `sentence-transformer` once you've decided on a model.
+
+## Install onto your vault
+
+Once you've kicked the tires on the sample vault, install the engine as a plug-in to your real vault:
+
+```bash
+# 1. Index your vault.
+uv run vault-engine --vault /path/to/your/vault reindex
+
+# 2. Drop overlays into the vault (skills + post-commit auto-reindex):
+./scripts/install-vault-overlays.sh --vault /path/to/your/vault
+
+# 3. Point git at the vault's hooks directory (one-time):
+git -C /path/to/your/vault config core.hooksPath .githooks
+```
+
+The installer is **idempotent** — re-running reports `[skip]` / `[update]` / `[new]` per file. Pass `--dry-run` to preview without writing. See [Plug-in pattern](#plug-in-pattern) for the full overlay layout and what each piece owns.
+
+Uninstall the engine and the vault still works — overlays are designed to no-op when the engine isn't on PATH.
 
 ## CLI
 
@@ -222,15 +241,7 @@ A vault without these overlays still works — the engine remains an opt-in perf
 
 ### Installing overlays into a vault
 
-```bash
-# From the engine repo:
-./scripts/install-vault-overlays.sh --vault /path/to/your/vault
-
-# Then point git at the vault's hooks (one-time):
-git -C /path/to/your/vault config core.hooksPath .githooks
-```
-
-The installer is idempotent — re-running reports skipped vs updated vs new files. Pass `--dry-run` to preview without writing.
+See the [Install onto your vault](#install-onto-your-vault) quickstart above for the canonical adoption flow. The installer is idempotent and supports `--dry-run`.
 
 ## Project structure
 
