@@ -213,10 +213,24 @@ The second-brain template runs standalone. Integrations between vault and engine
 
 - **`vault-engine hook install --vault <path>`** — installs Claude Code Glob/Grep hint that prefers `/vault query` (idempotent, per-OS).
 - **`scripts/install-windows-service.ps1`** — registers an NSSM service for engine HTTP/MCP on PC.
-- **Post-commit reindex hook** (overlay, planned) — drops `.githooks/post-commit` into the vault to fire `vault-engine reindex` after every commit.
-- **Engine-aware vault skills** (overlay, planned) — `synth.md`, `crawl.md` that hard-require engine MCP, installable from this repo into the consumer's vault.
+- **`scripts/install-vault-overlays.sh`** — drops engine-aware vault overlays into a target vault:
+  - `skills/vault/synth.md` — engine-aware insight-discovery skill (uses MCP `query_graph`).
+  - `skills/vault/crawl.md` — engine-aware URL → `raw/` scrape skill (wraps `vault-engine add`).
+  - `.githooks/post-commit` — fires `vault-engine reindex` after every commit. Graceful no-op when the engine isn't on PATH, so the hook is safe to keep installed even after engine removal.
 
-A vault without these overlays still works — the engine remains an opt-in performance / capability boost, never a dependency.
+A vault without these overlays still works — the engine remains an opt-in performance / capability boost, never a dependency. Vault skills that benefit from the engine (e.g. `query.md`) include lexical fallbacks.
+
+### Installing overlays into a vault
+
+```bash
+# From the engine repo:
+./scripts/install-vault-overlays.sh --vault /path/to/your/vault
+
+# Then point git at the vault's hooks (one-time):
+git -C /path/to/your/vault config core.hooksPath .githooks
+```
+
+The installer is idempotent — re-running reports skipped vs updated vs new files. Pass `--dry-run` to preview without writing.
 
 ## Project structure
 
