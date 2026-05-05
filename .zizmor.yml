@@ -1,0 +1,6 @@
+# zizmor config — Dependabot owns action version bumps.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": any

@@ -21,3 +21,9 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Personal-info patterns (consumed by scripts/check-blocked-terms.sh)
+scripts/blocked-terms-personal.txt
+
+# Worktrees (used by ogre:execute)
+.worktrees/

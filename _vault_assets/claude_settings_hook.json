@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Glob|Grep",
+        "command": "<filled-by-installer>",
+        "description": "Hint Claude to use /vault query before raw filesystem search."
+      }
+    ]
+  }
+}
