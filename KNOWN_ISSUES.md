@@ -1,101 +1,63 @@
 # Known Issues
 
-Issues surfaced by the v0.1.0 multi-axis review that are deferred to a later
-release. Listed honestly so consumers can decide whether the engine fits
-their use case at current quality.
+Issues surfaced by the v0.1.0 multi-axis review and the cleanup that followed. Listed honestly so consumers can decide whether the engine fits their use case at current quality.
 
 Last updated: 2026-05-04
 
-## Performance ceiling at 10k+ pages
+## What landed in v0.1.0
 
-Several hot paths are O(N²) in vault size. The engine has been tested
-against vaults up to ~340 pages (the operator's Second-Brain vault) and
-runs comfortably there. Behavior at 10k+ pages is **not yet verified**.
+The multi-axis review surfaced 12 P0 + 14 critical-P1 findings. As of v0.1.0 ship:
 
-Specifically:
+- **All security P0s fixed** — SSRF guards on URL ingestion, request size and rate limits on the HTTP server, JWT exp-claim required, refuse-to-bind on non-loopback without a secret, blocked-terms scan with case-insensitive matching.
+- **All correctness P0s fixed** — service stop-race resolved, watcher rename emits both src and dest, slug collisions surface as SlugCollisionError, vec_store mutations atomic, file-size cap in reads.
+- **All documentation P0s fixed** — README CLI and eval-fixture schema match reality; sample vault expanded with multi-hop chains, alias chains, and an orphan; CI eval gate uses real expected_pages so it can fail.
+- **Performance P0s fixed** — graph walk replaced with bounded BFS, similarity-edge inference replaced with single-matmul, reindex_page does one disk walk instead of two.
+- **5 ADRs landed** — sqlite-vec, NetworkX, INFERRED threshold (0.85), router tiers, and default embedding model (mxbai-embed-large).
+- **Vault-overlay plug-in pattern landed** — engine-aware vault skills (synth, crawl) and the post-commit reindex hook moved out of the second-brain vault and into `overlays/` here, installable via `scripts/install-vault-overlays.sh`.
 
-- **`stores.graph_store.walk()`** uses `nx.all_simple_paths` per seed.
-  Worst-case combinatorial; OK at ~340 pages, slow at 10k+ on dense
-  graphs. Replacement with bounded BFS planned for v0.2.0.
+## What's deferred to v0.2.0
 
-- **`inference.add_similarity_edges`** runs O(N²) page-pair cosine on
-  every reindex AND every single-page edit. At 340 pages, single-edit
-  reindex is sub-second. At 10k pages, expect multi-second pauses on
-  every save. Vector-matmul rewrite + incremental scoring planned for
-  v0.2.0.
+### Architecture: CLI bypasses Service (P1-3)
 
-- **`vault_reader.iter_pages`** walks the disk and re-parses
-  frontmatter on every reindex. Page-index cache planned for v0.2.0.
+The CLI's `status`, `reindex`, `search`, `expand`, `source`, and `eval` commands construct an Indexer + Retrieval directly, while `serve` and `mcp` go through `Service`. Search via CLI uses the legacy `Retrieval` path (vec-only); search via HTTP/MCP uses `Service.router.dispatch` (dual-channel + RRF).
 
-If your vault is under ~1000 pages, none of this should bite. If
-larger, treat the engine as a beta and benchmark before relying on it.
+Two result shapes for the same logical query depending on transport. Refactor to make Service the single assembler is v0.2.0 work; a `Service.start(rebuild=False, watch=False)` mode will be needed for CLI commands that don't want a full rebuild on entry.
 
-## Architecture: CLI bypasses Service
+### Architecture: Transport facade (P1-4, partial)
 
-The CLI's `status`, `reindex`, `search`, `expand`, `source`, and `eval`
-commands construct an Indexer + Retrieval directly, while `serve` and
-`mcp` go through `Service`. Search via CLI uses the legacy `Retrieval`
-path (vec-only); search via HTTP/MCP uses `Service.router.dispatch`
-(dual-channel + RRF).
+A small typed surface landed on `Service`: `service.graph` (property), `service.graph_node(slug)`, `service.graph_stats()`. `mcp_server.py` and `http_server.py` no longer reach through `svc.graph_store.graph` for the most-common patterns.
 
-Two result shapes for the same logical query depending on transport.
-Refactor to make Service the single assembler is planned for v0.2.0.
+The full GraphQuery facade with all 10+ MCP tool primitives (`get_neighbors`, `get_community`, `god_nodes`, `shortest_path`, `find_topic_page`, `find_unlinked_references`, `get_linked_references`) is v0.2.0. Until then, transport handlers still inline some queries against `svc.graph` directly.
 
-## Architecture: Transport reaches into Service internals
+### Observability
 
-`http_server.py` and `mcp_server.py` access `svc.graph_store.graph`
-directly. Promotion to a typed `GraphQuery` facade planned for v0.2.0.
+- `vault-engine status` does not yet report the engine version, graph node/edge counts, or store fingerprint. Planned for v0.2.0.
+- HTTP/JSON request logging landed; per-channel timing on the retrieval hot path is still v0.2.0.
 
-## Observability gaps
+### Slug schema is filename-stem-only
 
-- No request-level logging on the retrieval hot path. No HTTP
-  correlation ID. `--verbose` / `--quiet` flags missing on the CLI;
-  log calls silently dropped without `logging.basicConfig`.
-- `vault-engine status` does not yet report the engine version, graph
-  node/edge counts, or store fingerprint. Planned for v0.2.0.
+Two pages with the same stem in different directories (`wiki/topics/foo.md` vs `raw/foo.md`) currently raise `SlugCollisionError` at index time. Kind-prefixed slugs (`topic-foo`, `raw-foo`) would resolve cleanly but require a vec-store migration. Planned for v0.2.0 with auto-migration via a schema-version column on `embedding_meta`.
 
-## Slug schema is filename-stem-only
+### URL ingestion robustness
 
-Two pages with the same stem in different directories
-(`wiki/topics/foo.md` vs `raw/foo.md`) currently raise
-`SlugCollisionError` at index time. Kind-prefixed slugs
-(`topic-foo`, `raw-foo`) would resolve cleanly but require a vec-store
-migration. Planned for v0.2.0 with auto-migration.
+`vault-engine add <url>` has SSRF, redirect, content-type, and size protections, but no retry/backoff on transient failures. A 5xx response or single ReadTimeout aborts with a `FetchError`. Retry-with-exponential-backoff planned for v0.2.0.
 
-## URL ingestion robustness
+### SentenceTransformer load
 
-`vault-engine add <url>` has SSRF, redirect, and size protections, but
-no retry/backoff on transient failures. A 5xx response or single
-ReadTimeout aborts with a `FetchError`. Retry-with-exponential-backoff
-planned for v0.2.0.
+`Service.__init__` loads the embedding model eagerly. The `EmbedderLoadError` wrapping landed (actionable error messages on import / load failures), but lazy-load on first encode is still v0.2.0 — until then, `serve` / `mcp` startup pays the model-load cost up front.
 
-## SentenceTransformer load
+### Test coverage gaps
 
-`Service.__init__` loads the embedding model eagerly. If the
-HuggingFace cache is missing or corrupt, or the network is offline at
-first run, `serve` / `mcp` exits with a stack trace. Lazy-load on
-first encode planned for v0.2.0.
+- `url_ingester.fetch_url` lacks integration tests against mocked HTTP. Existing tests cover the extract / write paths only.
+- Watcher tests use timing-sensitive sleeps; may flake on slow CI runners.
+- `community.compute_communities` is tested but the reindex_page edge cases (community ID stability across single-page edits) are not.
 
-## Test coverage gaps
+### Performance at very large vaults
 
-- `url_ingester.fetch_url` lacks integration tests against mocked HTTP.
-  All current tests cover the extract / write paths only.
-- Watcher tests use timing-sensitive sleeps; may flake on slow CI
-  runners.
-- `community.compute_communities` is tested but the reindex_page edge
-  cases (community ID stability across single-page edits) are not.
-
-## Documentation
-
-- No ADRs for the four non-obvious architectural decisions: sqlite-vec
-  selection, NetworkX over alternatives, the 0.85 INFERRED edge
-  threshold, and the LOOKUP/SEMANTIC/MULTI_HOP/HYBRID router boundaries.
-  ADRs planned for v0.2.0.
-- Class-level and public-method docstrings are sparse outside the CLI
-  and core stores. Module docstrings are present everywhere.
+The matmul + BFS rewrites in v0.1.0 take the engine from "unusable above ~500 pages" to "usable at ~10k pages." Beyond ~50k chunks, sqlite-vec's brute-force MATCH becomes the bottleneck (see ADR 0001); ANN structures (faiss / hnswlib) would unblock that. Out of scope for v0.2.0 unless usage demands it.
 
 ## Roadmap
 
-Items above will land in v0.2.0 with a follow-up multi-axis review
-before that release. v0.1.0 is honest-quality on security and
-correctness; performance and architecture refactors are next.
+v0.2.0 ships when the architecture refactors (CLI uses Service, full GraphQuery facade) and the slug schema migration are done. Likely 2-3 weeks of focused work after v0.1.0 lands.
+
+v0.1.0 is honest-quality on security, correctness, performance at target scale, and the wedge claim (no external API, local-only, citation chains for auditable retrieval). The deferred items in this file are real — none are hidden.

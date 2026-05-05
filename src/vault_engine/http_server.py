@@ -122,10 +122,6 @@ def build_app(svc: Service, *, secret: str | None, bind_addr: str | None = None)
 
     @app.get("/graph/stats", dependencies=[Depends(auth_dep)])
     async def graph_stats() -> dict:
-        G = svc.graph_store.graph
-        return {
-            "nodes": G.number_of_nodes(),
-            "edges": G.number_of_edges(),
-        }
+        return svc.graph_stats()
 
     return app

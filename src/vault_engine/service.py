@@ -115,6 +115,47 @@ class Service:
             return self.router.dispatch(q, seed_node=seed_node, top_k=top_k)
 
     # ------------------------------------------------------------------
+    # Graph facade — typed accessors for transports (HTTP, MCP).
+    #
+    # Reaching into ``svc.graph_store.graph`` directly couples transports
+    # to the underlying NetworkX DiGraph; these methods expose the most-
+    # used patterns through a typed surface. Full GraphQuery facade with
+    # all 10+ MCP tool primitives is on the v0.2.0 roadmap; the current
+    # surface covers the highest-traffic call sites.
+    # ------------------------------------------------------------------
+
+    @property
+    def graph(self):
+        """The underlying NetworkX DiGraph. Prefer the typed accessors
+        below where they cover the use case; this property exists so
+        transports don't have to traverse ``.graph_store.graph`` and so
+        a future GraphQuery facade has a single rename target.
+        """
+        return self.graph_store.graph
+
+    def graph_node(self, slug: str) -> dict | None:
+        """Return the node attribute dict for ``slug``, or None if absent."""
+        g = self.graph_store.graph
+        if not g.has_node(slug):
+            return None
+        return dict(g.nodes[slug])
+
+    def graph_stats(self) -> dict:
+        """Return summary stats: node count, edge count, communities, edge-type counts."""
+        g = self.graph_store.graph
+        type_counts: dict[str, int] = {}
+        for _, _, d in g.edges(data=True):
+            t = d.get("edge_type", "EXTRACTED")
+            type_counts[t] = type_counts.get(t, 0) + 1
+        communities = {d.get("community") for _, d in g.nodes(data=True) if "community" in d}
+        return {
+            "nodes": g.number_of_nodes(),
+            "edges": g.number_of_edges(),
+            "communities": len(communities),
+            "edge_types": type_counts,
+        }
+
+    # ------------------------------------------------------------------
     # Internal callbacks
     # ------------------------------------------------------------------
 

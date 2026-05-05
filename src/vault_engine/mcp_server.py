@@ -151,7 +151,7 @@ def build_server(svc: Service) -> _ServerHandle:
         lines = [
             f"Intent: {result['intent']} | {len(fused)} fused hits",
         ]
-        G = svc.graph_store.graph
+        G = svc.graph
         for h in fused:
             node = G.nodes.get(h.doc_id, {})
             lines.append(
@@ -164,7 +164,7 @@ def build_server(svc: Service) -> _ServerHandle:
 
     def _get_node(args: dict) -> str:
         label = args["label"]
-        G = svc.graph_store.graph
+        G = svc.graph
         if label not in G:
             # fallback: scan by title
             for nid, data in G.nodes(data=True):
@@ -188,7 +188,7 @@ def build_server(svc: Service) -> _ServerHandle:
     def _get_neighbors(args: dict) -> str:
         label = args["label"]
         rel_filter = (args.get("relation_filter") or "").lower()
-        G = svc.graph_store.graph
+        G = svc.graph
         if label not in G:
             return f"No node matching {label!r}."
         lines = [f"Neighbors of {G.nodes[label].get('title', label)}:"]
@@ -204,7 +204,7 @@ def build_server(svc: Service) -> _ServerHandle:
 
     def _get_community(args: dict) -> str:
         cid = int(args["community_id"])
-        G = svc.graph_store.graph
+        G = svc.graph
         members = [n for n, d in G.nodes(data=True) if d.get("community") == cid]
         if not members:
             return f"Community {cid} not found."
@@ -216,7 +216,7 @@ def build_server(svc: Service) -> _ServerHandle:
 
     def _god_nodes(args: dict) -> str:
         top_n = int(args.get("top_n", 10))
-        G = svc.graph_store.graph
+        G = svc.graph
         ranked = sorted(G.nodes(data=True), key=lambda nd: G.degree(nd[0]), reverse=True)[:top_n]
         lines = ["God nodes (most connected):"]
         for i, (nid, d) in enumerate(ranked, 1):
@@ -224,7 +224,7 @@ def build_server(svc: Service) -> _ServerHandle:
         return "\n".join(lines)
 
     def _graph_stats(_args: dict) -> str:
-        G = svc.graph_store.graph
+        G = svc.graph
         types_count: dict[str, int] = {"EXTRACTED": 0, "INFERRED": 0, "AMBIGUOUS": 0}
         for _, _, d in G.edges(data=True):
             t = d.get("edge_type", "EXTRACTED")
@@ -266,19 +266,19 @@ def build_server(svc: Service) -> _ServerHandle:
         topic_hits = [
             h
             for h in result["fused_hits"]
-            if svc.graph_store.graph.nodes.get(h.doc_id, {}).get("kind") == "topic"
+            if svc.graph.nodes.get(h.doc_id, {}).get("kind") == "topic"
         ]
         if not topic_hits:
             return "No topic page matched."
         return "\n".join(
-            f"{svc.graph_store.graph.nodes[h.doc_id].get('path', h.doc_id)}: rrf={h.rrf_score:.4f}"
+            f"{svc.graph.nodes[h.doc_id].get('path', h.doc_id)}: rrf={h.rrf_score:.4f}"
             for h in topic_hits
         )
 
     def _find_unlinked_references(args: dict) -> str:
         # Stub for P2: surface candidate matches via alias_map.
         phrase = args["phrase"].lower()
-        G = svc.graph_store.graph
+        G = svc.graph
         out = []
         for nid, d in G.nodes(data=True):
             aliases = [a.lower() for a in d.get("aliases", [])]
@@ -290,7 +290,7 @@ def build_server(svc: Service) -> _ServerHandle:
 
     def _get_linked_references(args: dict) -> str:
         page = args["page_path"]
-        G = svc.graph_store.graph
+        G = svc.graph
         target = None
         for nid, d in G.nodes(data=True):
             if d.get("path") == page or nid == page:
