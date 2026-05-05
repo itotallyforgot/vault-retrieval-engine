@@ -69,7 +69,7 @@ auditable retrieval, eval harness with latency SLOs.
   coverage assertions).
 - 5 ADRs documenting non-obvious decisions (sqlite-vec, NetworkX,
   INFERRED threshold 0.85, router tiers, mxbai default model).
-- 134 tests; ruff + format clean; CI runs eval against the sample
+- 129 tests; ruff + format clean; CI runs eval against the sample
   vault on every PR.
 
 ### Security & correctness
