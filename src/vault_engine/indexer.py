@@ -116,6 +116,11 @@ class Indexer:
 
         Reuses the rebuild() encode-skip path, so frontmatter-only edits
         (or any change that leaves body chunks identical) are essentially free.
+
+        Walks the vault once via ``iter_pages`` — the result is reused for
+        the graph rebuild. Previous versions walked disk twice on
+        ``rebuild()`` paths; this implementation passes the cached page list
+        through.
         """
         report = IndexReport()
         if not path.exists():
@@ -134,8 +139,11 @@ class Indexer:
                 self.vec.delete_page(page.slug)
             report.pages_processed = 1
 
-        # Always rebuild the graph after a single-page change — cheap at vault scale.
-        self.graph.rebuild(iter_pages(self.cfg.vault_path))
+        # Single disk walk for the graph rebuild. iter_pages is the only
+        # way the engine knows which pages exist post-rename / post-delete,
+        # so this stays even for the deleted-file branch.
+        pages = iter_pages(self.cfg.vault_path)
+        self.graph.rebuild(pages)
         add_similarity_edges(
             self.graph,
             self.vec,

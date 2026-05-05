@@ -46,6 +46,13 @@ class GraphStore:
         self.graph.add_edge(src, dst, **attrs)
 
     def rebuild(self, pages: list[Page]) -> None:
+        """Rebuild the graph from a pre-fetched page list.
+
+        ``pages`` is owned by the caller (typically Indexer or Service).
+        This method does not walk the vault filesystem itself — that's the
+        caller's job. Letting the caller pass a cached page list avoids
+        repeated disk walks on per-page reindex paths.
+        """
         self.graph = nx.DiGraph()
         self._alias_map = build_alias_map(pages)
 
@@ -83,22 +90,59 @@ class GraphStore:
         self,
         seeds: list[str],
         max_depth: int = 3,
+        max_paths: int = 10_000,
     ) -> list[list[str]]:
-        """BFS from each seed, returning every path up to max_depth."""
+        """Bounded BFS from each seed, yielding every simple path up to max_depth.
+
+        Replaces a prior O(N^2) implementation that called
+        ``nx.all_simple_paths`` per (seed, target) pair — which degenerates
+        catastrophically on dense graphs (the engine's INFERRED edges tend
+        to produce dense communities).
+
+        Implementation:
+        - One BFS per seed. Frontier carries the partial path so simple-path
+          semantics are preserved without revisiting a node within the same
+          path.
+        - Each path of length >= 2 is emitted (excluding the trivial
+          ``[seed]`` path).
+        - Total returned paths capped at ``max_paths`` to bound memory under
+          fan-out from highly-connected nodes; once the cap is hit, returns
+          immediately.
+
+        Args:
+            seeds: Starting nodes. Missing nodes are skipped, not raised.
+            max_depth: Maximum path length (number of edges, not nodes).
+            max_paths: Hard cap on returned path count. Defaults to 10k —
+                large enough for typical multi-hop UX, small enough to bound
+                memory on pathological graphs.
+
+        Returns:
+            List of paths (each path = list of node slugs in BFS order).
+            May be shorter than the natural BFS output when ``max_paths`` is
+            hit.
+        """
+        from collections import deque
+
         paths: list[list[str]] = []
         for seed in seeds:
             if not self.graph.has_node(seed):
                 continue
-            for target in self.graph.nodes:
-                if target == seed:
+            queue: deque[list[str]] = deque([[seed]])
+            while queue:
+                if len(paths) >= max_paths:
+                    return paths
+                path = queue.popleft()
+                # Emit non-trivial paths (length >= 2).
+                if len(path) > 1:
+                    paths.append(path)
+                if len(path) > max_depth:  # max_depth edges = max_depth+1 nodes
                     continue
-                try:
-                    for path in nx.all_simple_paths(
-                        self.graph, source=seed, target=target, cutoff=max_depth
-                    ):
-                        paths.append(list(path))
-                except nx.NetworkXNoPath:
-                    continue
+                tail = path[-1]
+                for neighbor in self.graph.successors(tail):
+                    if neighbor in path:
+                        # Avoid revisiting within the same path (simple-path semantics).
+                        continue
+                    queue.append([*path, neighbor])
         return paths
 
     def orphans(self) -> Iterable[str]:
