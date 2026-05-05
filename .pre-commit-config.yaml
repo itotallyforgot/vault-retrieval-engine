@@ -1,0 +1,49 @@
+# Pre-commit hooks for vault-engine.
+# Stack: Python 3.12 + uv-managed.
+#
+# Install once:  pre-commit install && pre-commit install --hook-type commit-msg
+# Sweep all files: pre-commit run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.6.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--strict, feat, fix, docs, refactor, test, chore, ci, build, perf, style]
+
+  - repo: local
+    hooks:
+      - id: blocked-terms-scan
+        name: Blocked-term scan (NDA, employer, federal clients, personal info)
+        entry: scripts/check-blocked-terms.sh
+        language: script
+        types: [text]
+        pass_filenames: true
