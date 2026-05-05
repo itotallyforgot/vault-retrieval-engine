@@ -93,8 +93,8 @@ The `mock` embedder is fast and deterministic for iteration. Switch to `sentence
 | `vault-engine search <query> [--k N]` | Top-k semantic results with citation chains |
 | `vault-engine expand <wikilink>` | Multi-hop graph walk from a seed page |
 | `vault-engine source <page>` | Resolve `wiki/topics/<page>` → its source pages |
-| `vault-engine eval --fixtures <path> [--embedder mock\|st]` | Run the JSONL fixture eval; assert latency + page-coverage |
-| `vault-engine add <url>` | One-shot scrape a URL into `raw/` (trafilatura extraction) |
+| `vault-engine eval --fixtures <path> [--embedder mock\|default]` | Run the JSONL fixture eval; assert latency + page-coverage |
+| `vault-engine add <url> --vault <path>` | One-shot scrape a URL into `raw/` (trafilatura extraction). Note: `add`, `serve`, `mcp`, and `hook` define their own `--vault` flag; placement matters. |
 | `vault-engine mcp --vault <path>` | Start MCP stdio server |
 | `vault-engine serve --vault <path>` | Start HTTP/JSON server |
 | `vault-engine hook install --vault <path>` | Install the vault-side Glob/Grep hook |
@@ -181,15 +181,18 @@ Common knobs:
 
 The eval harness runs queries against a fixture file in JSONL. Each fixture asserts:
 
-- **Latency SLO** — `latency_ms_max` per query phase (chunk → embed → search → graph walk → citation)
-- **Page coverage** — top-k results must include named pages (e.g., `expected_pages: ["alpha-protocol", "beta-handoff"]`)
-- **Tier classification** — query routes correctly to LOOKUP, SEMANTIC, MULTI_HOP, or HYBRID
+- **Latency SLO** — `max_latency_ms` end-to-end per query
+- **Page coverage** — top-k results must include named pages (e.g., `expected_pages: ["alpha", "beta"]`)
+- **Mode classification** — query routes correctly: `lookup`, `semantic`, `multi_hop`, or `hybrid`
+- **Citation depth** — `min_citation_depth` lower bound on chunk → page → source chain length
 
 Sample fixture entry shape:
 
 ```jsonl
-{"query": "what does alpha do?", "expected_pages": ["alpha"], "tier": "SEMANTIC", "latency_ms_max": 250}
+{"id": "lookup-alpha", "query": "alpha", "expected_pages": ["alpha"], "min_citation_depth": 0, "mode": "lookup", "max_latency_ms": 5000}
 ```
+
+See `tests/fixtures/eval_fixtures.jsonl` for the full schema in use.
 
 CI runs the eval on every push using the mock embedder against `tests/fixtures/sample_vault`. Production runs use the real embedder against the real vault.
 
