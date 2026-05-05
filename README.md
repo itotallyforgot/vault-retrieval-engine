@@ -294,6 +294,10 @@ uv run vault-engine --vault tests/fixtures/sample_vault eval \
 
 Conventional Commits format. CI runs gitleaks + zizmor + ruff + pytest + eval-rig-mock on every push to `main` or `p1-engine-core`.
 
+## Architecture decisions
+
+See [`docs/adr/`](docs/adr/README.md) for ADRs covering the non-obvious choices: sqlite-vec, NetworkX, the 0.85 INFERRED edge threshold, the router's mode boundaries, and the default embedding model.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
