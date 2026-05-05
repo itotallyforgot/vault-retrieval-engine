@@ -216,7 +216,8 @@ The second-brain template runs standalone. Integrations between vault and engine
 - **`scripts/install-vault-overlays.sh`** — drops engine-aware vault overlays into a target vault:
   - `skills/vault/synth.md` — engine-aware insight-discovery skill (uses MCP `query_graph`).
   - `skills/vault/crawl.md` — engine-aware URL → `raw/` scrape skill (wraps `vault-engine add`).
-  - `.githooks/post-commit` — fires `vault-engine reindex` after every commit. Graceful no-op when the engine isn't on PATH, so the hook is safe to keep installed even after engine removal.
+  - `.githooks/post-commit` — vault-owned dispatcher that walks `.githooks/post-commit.d/*` in lexical order. Installed only if absent or matches the legacy monolithic engine hook (auto-migrated, with a `.legacy.bak`).
+  - `.githooks/post-commit.d/10-vault-engine.sh` — engine plug-in piece: fires `vault-engine reindex` after every commit. Graceful no-op when the engine isn't on PATH, so the piece is safe to keep installed even after engine removal. Numeric prefix (`10-`) lets future plug-ins sequence around it.
 
 A vault without these overlays still works — the engine remains an opt-in performance / capability boost, never a dependency. Vault skills that benefit from the engine (e.g. `query.md`) include lexical fallbacks.
 
