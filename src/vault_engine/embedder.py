@@ -6,12 +6,20 @@ Test/CI: MockEmbedder produces deterministic hash-based vectors.
 Both expose .encode(texts: list[str]) -> np.ndarray of shape (n, dim).
 """
 
-from __future__ import annotations
-
 import hashlib
 from typing import Protocol
 
 import numpy as np
+
+
+class EmbedderLoadError(RuntimeError):
+    """Raised when SentenceTransformer fails to load (network / cache / driver).
+
+    The message includes the model name and a hint at the most common fix
+    (run with --mock-embedder for offline iteration; check HF cache for
+    corruption; verify torch/CUDA install for GPU systems).
+    """
+
 
 _KNOWN_DIMS = {
     "mixedbread-ai/mxbai-embed-large-v1": 1024,
@@ -56,13 +64,29 @@ class SentenceTransformerEmbedder:
     """Real embedder using sentence-transformers; CUDA when available."""
 
     def __init__(self, model_name: str) -> None:
-        import torch
-        from sentence_transformers import SentenceTransformer  # local import (heavy)
+        try:
+            import torch
+            from sentence_transformers import (
+                SentenceTransformer,  # local import (heavy)
+            )
+        except ImportError as e:
+            raise EmbedderLoadError(
+                f"sentence-transformers / torch not importable: {e}. "
+                "Run `uv sync` to install dependencies, or pass --mock-embedder "
+                "for offline iteration."
+            ) from e
 
         self.model_name = model_name
         self.dim = embed_dim_for_model(model_name)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self._model = SentenceTransformer(model_name, device=device)
+        try:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self._model = SentenceTransformer(model_name, device=device)
+        except (OSError, RuntimeError, ValueError) as e:
+            raise EmbedderLoadError(
+                f"failed to load embedding model {model_name!r}: {e}. "
+                "Check HF cache (~/.cache/huggingface) for corruption, network "
+                "connectivity for first-run downloads, or pass --mock-embedder."
+            ) from e
 
     def encode(self, texts: list[str]) -> np.ndarray:
         out = self._model.encode(

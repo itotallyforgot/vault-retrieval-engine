@@ -4,8 +4,7 @@ Composes vec store + graph store + vault filesystem. Stateless aside from
 references to indexer.
 """
 
-from __future__ import annotations
-
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,6 +15,10 @@ from vault_engine.reranker import RankedHit
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecHit
 from vault_engine.vault_reader import iter_pages, read_page
+
+# Aliases shorter than this are skipped from unlinked-mention detection
+# (would otherwise produce a flood of false positives on common words).
+_MIN_ALIAS_LEN = 3
 
 
 @dataclass
@@ -32,6 +35,12 @@ class ConsolidationReport:
     duplicate_clusters: list[list[str]] = field(default_factory=list)
     unlinked_mentions: list[tuple[str, str]] = field(default_factory=list)
     # unlinked_mentions = [(page_slug, mentioned_alias)]
+
+
+@dataclass
+class MultiHopResult:
+    seeds: list[str]
+    paths: list[list[str]]
 
 
 class Retrieval:
@@ -79,31 +88,72 @@ class Retrieval:
 
     # ---- consolidation ----
     def consolidation_candidates(self) -> ConsolidationReport:
+        """Detect orphan pages and unlinked alias mentions across the vault.
+
+        Performance: builds a single compiled alternation regex over all
+        eligible aliases (>= ``_MIN_ALIAS_LEN`` chars) and scans each page
+        body in one pass. Replaces an earlier O(P^2 * M) per-alias regex
+        loop that compiled inside the inner loop.
+        """
         report = ConsolidationReport()
         report.orphan_pages = list(self.indexer.graph.orphans())
-        # Duplicate clusters: pages whose top-1 semantic neighbor is mutual.
-        # Skipped in v1 (placeholder for future enrichment); kept empty.
-        # Unlinked mentions: page body contains an alias for another page
-        # but no wikilink to it.
+
         pages = iter_pages(self.cfg.vault_path)
         alias_to_slug: dict[str, str] = {}
         for p in pages:
             for name in p.all_names:
-                alias_to_slug.setdefault(name.lower(), p.slug)
+                key = name.lower()
+                if len(key) >= _MIN_ALIAS_LEN:
+                    alias_to_slug.setdefault(key, p.slug)
+
+        if not alias_to_slug:
+            return report
+
+        # Compile one alternation regex over all aliases. Sort longest-first
+        # so "foo-bar" is preferred over "foo" when both match.
+        pattern = re.compile(
+            r"\b("
+            + "|".join(re.escape(a) for a in sorted(alias_to_slug, key=len, reverse=True))
+            + r")\b"
+        )
         for p in pages:
             body_lower = p.body.lower()
             linked = {wl.lower() for wl in p.wikilinks}
-            for alias, target_slug in alias_to_slug.items():
-                if target_slug == p.slug:
+            seen_pairs: set[tuple[str, str]] = set()
+            for match in pattern.finditer(body_lower):
+                alias = match.group(1)
+                target_slug = alias_to_slug[alias]
+                if target_slug == p.slug or alias in linked:
                     continue
-                if alias in linked:
+                pair = (p.slug, alias)
+                if pair in seen_pairs:
                     continue
-                # Word-boundary match.
-                import re
-
-                if re.search(rf"\b{re.escape(alias)}\b", body_lower):
-                    report.unlinked_mentions.append((p.slug, alias))
+                seen_pairs.add(pair)
+                report.unlinked_mentions.append(pair)
         return report
+
+    # ---- graph methods (folded in from former _retrieval_graph_walk / _multi_hop) ----
+    def graph_walk(self, seeds: list[str], depth: int | None = None) -> list[list[str]]:
+        depth = depth or self.cfg.graph_max_depth
+        return self.indexer.graph.walk(seeds=seeds, max_depth=depth)
+
+    def multi_hop(
+        self,
+        seed_query: str,
+        min_seeds_touched: int = 2,
+        depth: int | None = None,
+    ) -> MultiHopResult:
+        """Find seed pages via semantic search, then BFS for paths that touch >= min_seeds."""
+        depth = depth or self.cfg.graph_max_depth
+        hits = self.search(seed_query, k=self.cfg.semantic_top_k)
+        seed_slugs: list[str] = []
+        for h in hits:
+            if h.page_slug not in seed_slugs:
+                seed_slugs.append(h.page_slug)
+        all_paths = self.indexer.graph.walk(seeds=seed_slugs, max_depth=depth)
+        seed_set = set(seed_slugs)
+        filtered = [p for p in all_paths if len(seed_set.intersection(p)) >= min_seeds_touched]
+        return MultiHopResult(seeds=seed_slugs, paths=filtered)
 
     # ---- helpers ----
     def _path_for_slug(self, page_slug: str) -> Path | None:
@@ -111,51 +161,6 @@ class Retrieval:
             if page.slug == page_slug:
                 return page.path
         return None
-
-
-@dataclass
-class MultiHopResult:
-    seeds: list[str]
-    paths: list[list[str]]
-
-
-class _RetrievalGraphMixin:
-    """Inline mixin to keep graph methods grouped — methods attached below."""
-
-    pass
-
-
-def _retrieval_graph_walk(
-    self: Retrieval,
-    seeds: list[str],
-    depth: int | None = None,
-) -> list[list[str]]:
-    depth = depth or self.cfg.graph_max_depth
-    return self.indexer.graph.walk(seeds=seeds, max_depth=depth)
-
-
-def _retrieval_multi_hop(
-    self: Retrieval,
-    seed_query: str,
-    min_seeds_touched: int = 2,
-    depth: int | None = None,
-) -> MultiHopResult:
-    """Find seed pages via semantic search, then BFS for paths that touch >= min_seeds."""
-    depth = depth or self.cfg.graph_max_depth
-    hits = self.search(seed_query, k=self.cfg.semantic_top_k)
-    seed_slugs: list[str] = []
-    for h in hits:
-        if h.page_slug not in seed_slugs:
-            seed_slugs.append(h.page_slug)
-    all_paths = self.indexer.graph.walk(seeds=seed_slugs, max_depth=depth)
-    seed_set = set(seed_slugs)
-    filtered = [p for p in all_paths if len(seed_set.intersection(p)) >= min_seeds_touched]
-    return MultiHopResult(seeds=seed_slugs, paths=filtered)
-
-
-# Attach methods to Retrieval after class definition (keeps single-class import clean).
-Retrieval.graph_walk = _retrieval_graph_walk  # type: ignore[attr-defined]
-Retrieval.multi_hop = _retrieval_multi_hop  # type: ignore[attr-defined]
 
 
 def topology_walk(graph_store: GraphStore, seed: str, depth: int = 3) -> list[RankedHit]:

@@ -9,13 +9,22 @@ localhost). This is config-enforced at app construction time.
 
 Request limits: query body capped at 2 KB, top_k capped at 100. Larger
 requests rejected at validation time.
+
+Observability: every authenticated route logs a single structured line
+with request id, path, status, latency, and result counts.
 """
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+import logging
+import time
+import uuid
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from vault_engine.auth import TokenError, verify_token
 from vault_engine.service import Service
+
+log = logging.getLogger(__name__)
 
 _LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -60,6 +69,23 @@ def build_app(svc: Service, *, secret: str | None, bind_addr: str | None = None)
         )
 
     app = FastAPI(title="vault-retrieval-engine", version="p2")
+
+    @app.middleware("http")
+    async def _log_request(request: Request, call_next):
+        rid = uuid.uuid4().hex[:8]
+        start = time.monotonic()
+        response = await call_next(request)
+        latency_ms = int((time.monotonic() - start) * 1000)
+        log.info(
+            "rid=%s method=%s path=%s status=%d latency_ms=%d",
+            rid,
+            request.method,
+            request.url.path,
+            response.status_code,
+            latency_ms,
+        )
+        response.headers["X-Request-Id"] = rid
+        return response
 
     async def auth_dep(authorization: str | None = Header(default=None)) -> None:
         if secret is None:

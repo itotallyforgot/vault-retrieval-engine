@@ -1,8 +1,7 @@
 """vault-engine CLI."""
 
-from __future__ import annotations
-
 import json
+import logging
 import platform
 import shutil
 from pathlib import Path
@@ -26,6 +25,23 @@ console = Console()
 _state: dict[str, object] = {}
 
 
+def _configure_logging(verbose: bool, quiet: bool) -> None:
+    """Wire up Python logging based on CLI verbosity flags.
+
+    Without this, every ``log.info`` and ``log.debug`` call in the engine
+    is silently dropped because no handler is configured.
+    """
+    if verbose and quiet:
+        # Mutually exclusive; quiet wins per principle of least surprise.
+        verbose = False
+    level = logging.DEBUG if verbose else (logging.WARNING if quiet else logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -34,7 +50,10 @@ def main(
     mock_embedder: bool = typer.Option(
         False, "--mock-embedder", help="Use deterministic mock embedder (tests only)."
     ),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG-level logs."),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress everything below WARNING."),
 ) -> None:
+    _configure_logging(verbose=verbose, quiet=quiet)
     # Sub-commands that take their own --vault (or none at all) skip setup.
     # `hook` has no vault state. `serve`/`mcp` construct their own EngineConfig
     # from their own --vault flag so they can run as long-lived processes.

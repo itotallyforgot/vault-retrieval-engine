@@ -77,9 +77,7 @@ def read_page(path: Path) -> Page:
     """
     size = path.stat().st_size
     if size > _MAX_PAGE_BYTES:
-        raise ValueError(
-            f"page too large: {path} ({size} bytes > {_MAX_PAGE_BYTES} cap)"
-        )
+        raise ValueError(f"page too large: {path} ({size} bytes > {_MAX_PAGE_BYTES} cap)")
     text = path.read_text(encoding="utf-8", errors="replace")
     fm = frontmatter.loads(text)
     fm_dict: dict[str, Any] = {
