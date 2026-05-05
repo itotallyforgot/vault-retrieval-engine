@@ -1,26 +1,64 @@
-"""FastAPI HTTP/JSON server. Bound to a single interface address externally;
-this module only constructs the app — binding lives in CLI.
+"""FastAPI HTTP/JSON server.
 
-Auth: optional pre-shared HS256 token. If `secret is None`, all routes are
-open (only safe behind loopback or Tailscale on a trusted tailnet).
+Bound to a single interface address externally; this module only constructs
+the app — binding lives in CLI.
+
+Auth: optional pre-shared HS256 token. If ``secret is None``, the server
+**refuses to bind** to anything other than loopback (127.0.0.1, ::1,
+localhost). This is config-enforced at app construction time.
+
+Request limits: query body capped at 2 KB, top_k capped at 100. Larger
+requests rejected at validation time.
 """
 
-from __future__ import annotations
-
 from fastapi import Depends, FastAPI, Header, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from vault_engine.auth import TokenError, verify_token
 from vault_engine.service import Service
 
+_LOOPBACK_HOSTS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+class HttpServerConfigError(Exception):
+    """Raised when the HTTP server configuration is unsafe to start."""
+
 
 class QueryRequest(BaseModel):
-    q: str
-    seed_node: str | None = None
-    top_k: int = 10
+    """Bounded query payload. Caller-supplied strings are length-capped to
+    prevent memory/CPU DoS via crafted oversize inputs."""
+
+    q: str = Field(..., min_length=1, max_length=2000)
+    seed_node: str | None = Field(default=None, max_length=200)
+    top_k: int = Field(default=10, ge=1, le=100)
 
 
-def build_app(svc: Service, *, secret: str | None) -> FastAPI:
+def build_app(svc: Service, *, secret: str | None, bind_addr: str | None = None) -> FastAPI:
+    """Construct the FastAPI app for this service instance.
+
+    Args:
+        svc: Running Service to back the routes.
+        secret: HS256 pre-shared key. ``None`` runs unauthenticated; the
+            server then refuses to bind to non-loopback interfaces.
+        bind_addr: Bind interface this app will be served on. Used for the
+            non-loopback safety check when ``secret`` is None. Defaults to
+            ``svc.cfg.http_bind_addr`` if available.
+
+    Raises:
+        HttpServerConfigError: ``secret is None`` and the bind interface is
+            not loopback. Set ``http_token`` in config or bind to localhost.
+    """
+    effective_bind = (
+        bind_addr
+        if bind_addr is not None
+        else getattr(getattr(svc, "cfg", None), "http_bind_addr", "127.0.0.1")
+    )
+    if secret is None and effective_bind not in _LOOPBACK_HOSTS:
+        raise HttpServerConfigError(
+            f"refusing to start HTTP server: secret is None on non-loopback bind "
+            f"({effective_bind!r}). Set http_token in config or bind to loopback."
+        )
+
     app = FastAPI(title="vault-retrieval-engine", version="p2")
 
     async def auth_dep(authorization: str | None = Header(default=None)) -> None:

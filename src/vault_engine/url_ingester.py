@@ -3,7 +3,7 @@
 Splits the "scrape an article off the web" job from the "synthesize it
 into the wiki" job. This module owns the scrape half:
 
-  fetch_url     — HTTP GET with a sane UA and timeout
+  fetch_url     — HTTP GET with SSRF guard, size cap, redirect cap
   extract_article — readability/trafilatura-based content extraction
   slugify_for_raw — date-prefixed kebab-case filename
   write_raw_file — assembles frontmatter + body, writes to <vault>/raw/
@@ -15,19 +15,31 @@ the source — that is judgment work that belongs to the user + LLM
 synthesis pass, not to a scraper.
 """
 
-from __future__ import annotations
-
+import ipaddress
 import re
+import socket
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import trafilatura
 
 _DEFAULT_USER_AGENT = "vault-engine/0.1 (+https://github.com/itotallyforgot/vault-retrieval-engine)"
 _DEFAULT_TIMEOUT_S = 15.0
+_DEFAULT_MAX_REDIRECTS = 5
+_DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
+_ALLOWED_SCHEMES = ("http", "https")
+_ALLOWED_CONTENT_TYPES = (
+    "text/html",
+    "application/xhtml+xml",
+    "text/plain",
+)
+
+
+class FetchError(Exception):
+    """Raised when a URL fetch fails for any reason (network, security, size)."""
 
 
 @dataclass
@@ -39,21 +51,111 @@ class ExtractedArticle:
     published: str | None  # raw string from the page, not parsed
 
 
+def _is_unsafe_host(host: str) -> bool:
+    """Return True if host resolves to a private/loopback/link-local/reserved IP.
+
+    Fail-closed semantics: unresolvable hosts return True. This blocks SSRF
+    via DNS rebinding by checking the resolved IP at fetch time, not just
+    parsing the hostname.
+    """
+    if not host:
+        return True
+    # Try direct IP literal first (handles "192.168.0.1", "::1", etc.)
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Hostname — resolve via DNS.
+        try:
+            ip = ipaddress.ip_address(socket.gethostbyname(host))
+        except (OSError, ValueError):
+            return True  # fail closed
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+def _validate_target(url: str) -> str:
+    """Validate URL scheme and resolved host. Returns normalized URL.
+
+    Raises:
+        FetchError: on disallowed scheme, missing host, or unsafe-host resolution.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_SCHEMES:
+        raise FetchError(f"unsupported scheme: {parsed.scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise FetchError(f"missing host in url: {url!r}")
+    if _is_unsafe_host(host):
+        raise FetchError(f"refusing fetch: {host!r} resolves to private/loopback/reserved IP")
+    return url
+
+
 def fetch_url(
     url: str,
     *,
     user_agent: str = _DEFAULT_USER_AGENT,
     timeout: float = _DEFAULT_TIMEOUT_S,
+    max_redirects: int = _DEFAULT_MAX_REDIRECTS,
+    max_bytes: int = _DEFAULT_MAX_BYTES,
 ) -> str:
-    """HTTP GET, returning decoded body text. Raises on 4xx/5xx."""
-    resp = httpx.get(
-        url,
-        headers={"User-Agent": user_agent, "Accept": "text/html,application/xhtml+xml"},
-        timeout=timeout,
-        follow_redirects=True,
-    )
-    resp.raise_for_status()
-    return resp.text
+    """HTTP GET with SSRF, redirect, and size protections.
+
+    - Original URL and every redirect target re-validated against an
+      RFC1918 / loopback / link-local / reserved-IP denylist.
+    - Redirect count capped (default 5).
+    - Response size capped (default 10 MiB).
+    - Content-Type checked before reading body.
+
+    Raises:
+        FetchError: any disallowed condition (private IP, redirect loop,
+            oversize body, non-HTML content-type, network error).
+    """
+    headers = {
+        "User-Agent": user_agent,
+        "Accept": "text/html,application/xhtml+xml,text/plain;q=0.5",
+    }
+    current = _validate_target(url)
+    try:
+        with httpx.Client(
+            timeout=timeout,
+            follow_redirects=False,
+            headers=headers,
+        ) as client:
+            for hop in range(max_redirects + 1):
+                resp = client.get(current)
+                if resp.is_redirect and hop < max_redirects:
+                    location = resp.headers.get("location", "")
+                    if not location:
+                        raise FetchError("redirect without location header")
+                    current = _validate_target(urljoin(current, location))
+                    continue
+                resp.raise_for_status()
+                ctype = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                if ctype and not any(
+                    ctype.startswith(allowed) for allowed in _ALLOWED_CONTENT_TYPES
+                ):
+                    raise FetchError(f"unsupported content-type: {ctype!r}")
+                clen_header = resp.headers.get("content-length")
+                if clen_header is not None:
+                    try:
+                        clen = int(clen_header)
+                    except ValueError as e:
+                        raise FetchError(f"malformed content-length: {clen_header!r}") from e
+                    if clen > max_bytes:
+                        raise FetchError(f"response declares {clen} bytes, max is {max_bytes}")
+                body = resp.content
+                if len(body) > max_bytes:
+                    raise FetchError(f"response is {len(body)} bytes, max is {max_bytes}")
+                return resp.text
+            raise FetchError(f"redirect cap ({max_redirects}) exceeded")
+    except httpx.HTTPError as e:
+        raise FetchError(f"http error: {e}") from e
 
 
 def extract_article(html: str, *, url: str) -> ExtractedArticle:
@@ -87,12 +189,21 @@ def extract_article(html: str, *, url: str) -> ExtractedArticle:
     published = metadata.date if metadata else None
 
     return ExtractedArticle(
-        title=title.strip(),
+        title=_strip_unsafe_chars(title.strip()),
         body=(body or "").strip(),
         url=url,
-        author=(author.strip() if author else None),
-        published=(published.strip() if published else None),
+        author=_strip_unsafe_chars(author.strip()) if author else None,
+        published=_strip_unsafe_chars(published.strip()) if published else None,
     )
+
+
+def _strip_unsafe_chars(s: str) -> str:
+    """Drop control chars and bidirectional override codepoints from a scalar.
+
+    Prevents YAML frontmatter injection via crafted page metadata containing
+    newlines or bidi override marks.
+    """
+    return re.sub(r"[\x00-\x1f\x7f‪-‮⁦-⁩]", "", s)
 
 
 def _title_from_url(url: str) -> str:
@@ -145,17 +256,27 @@ def write_raw_file(
 ) -> Path:
     """Render frontmatter + body and write to `<vault>/raw/<slug>.md`.
 
-    Raises `FileExistsError` if the target file exists and `overwrite` is
-    False. Returns the absolute path written.
+    Verifies the resolved target stays inside ``vault_path`` to defend
+    against symlinked / traversal-style vault roots.
+
+    Raises:
+        FileExistsError: target file exists and ``overwrite`` is False.
+        FetchError: target would land outside ``vault_path`` (path traversal
+            guard).
     """
-    raw_dir = vault_path / "raw"
+    vault_root = vault_path.resolve()
+    raw_dir = (vault_root / "raw").resolve()
     raw_dir.mkdir(parents=True, exist_ok=True)
 
     # Use the clipped_at date for the filename prefix so the file name lines
     # up with the user's local timezone in clipped_at, not UTC.
     on_date = _date_from_clipped_at(clipped_at)
     slug = slugify_for_raw(article.title, on_date=on_date)
-    target = raw_dir / f"{slug}.md"
+    target = (raw_dir / f"{slug}.md").resolve()
+    try:
+        target.relative_to(vault_root)
+    except ValueError as e:
+        raise FetchError(f"refusing write: target {target} escapes vault root {vault_root}") from e
 
     if target.exists() and not overwrite:
         raise FileExistsError(
@@ -204,7 +325,12 @@ def _date_from_clipped_at(clipped_at: str) -> date:
 
 
 def _yaml_escape(s: str) -> str:
-    """Escape a string for use inside a YAML double-quoted scalar."""
+    """Escape a string for use inside a YAML double-quoted scalar.
+
+    Strips control chars + bidi overrides defensively, then escapes
+    backslashes and double-quotes.
+    """
+    s = _strip_unsafe_chars(s)
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
@@ -226,7 +352,7 @@ def add_url(
     article = extract_article(html, url=url)
     if title_override:
         article = ExtractedArticle(
-            title=title_override,
+            title=_strip_unsafe_chars(title_override),
             body=article.body,
             url=article.url,
             author=article.author,

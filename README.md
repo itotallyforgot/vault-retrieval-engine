@@ -2,7 +2,7 @@
 
 Local semantic retrieval engine over personal markdown vaults. No external API. Citation chains for auditable retrieval.
 
-Built for the [LLM-wiki](https://github.com/buildermethods/llm-wiki) / Second-Brain pattern, but works with any markdown vault that uses wikilinks.
+A plug-in for second-brain-template-shaped vaults — overlays retrieval, semantic search, and citation chains onto a vault that runs standalone without it. Works with any markdown vault that uses wikilinks; the vault remains the source of truth and the engine is best-effort enrichment.
 
 ## Why
 
@@ -203,6 +203,17 @@ The vault filesystem is the source of truth. The engine is enrichment. Consumers
 - HTTP and MCP transports are optional surfaces; CLI is always the baseline.
 
 If the engine is uninstalled, crashed, or unreachable, no vault content is lost. Reindex from scratch takes seconds-to-minutes depending on vault size.
+
+## Plug-in pattern
+
+The second-brain template runs standalone. Integrations between vault and engine are designed as overlays installed from this repo, not as plumbing inside the vault:
+
+- **`vault-engine hook install --vault <path>`** — installs Claude Code Glob/Grep hint that prefers `/vault query` (idempotent, per-OS).
+- **`scripts/install-windows-service.ps1`** — registers an NSSM service for engine HTTP/MCP on PC.
+- **Post-commit reindex hook** (overlay, planned) — drops `.githooks/post-commit` into the vault to fire `vault-engine reindex` after every commit.
+- **Engine-aware vault skills** (overlay, planned) — `synth.md`, `crawl.md` that hard-require engine MCP, installable from this repo into the consumer's vault.
+
+A vault without these overlays still works — the engine remains an opt-in performance / capability boost, never a dependency.
 
 ## Project structure
 

@@ -31,9 +31,9 @@ for file in "$@"; do
   [ -f "$file" ] || continue
 
   for term in "${BLOCKED_TERMS[@]}"; do
-    if grep -wnF "$term" "$file" >/dev/null 2>&1; then
+    if grep -inF "$term" "$file" >/dev/null 2>&1; then
       echo "BLOCKED: '$term' found in $file"
-      grep -wnF "$term" "$file" | head -3 | sed 's/^/  /'
+      grep -inF "$term" "$file" | head -3 | sed 's/^/  /'
       found_match=1
     fi
   done
