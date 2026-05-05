@@ -1,9 +1,9 @@
 import asyncio
 
-from vault_engine.mcp_server import build_server
-from vault_engine.service import Service
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
+from vault_engine.mcp_server import build_server
+from vault_engine.service import Service
 
 
 def _service(sample_vault, tmp_path):

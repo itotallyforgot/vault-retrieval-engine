@@ -26,7 +26,7 @@ class FixtureRow:
     max_latency_ms: int
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> "FixtureRow":
+    def from_dict(cls, raw: dict[str, Any]) -> FixtureRow:
         return cls(
             id=str(raw["id"]),
             query=str(raw["query"]),
@@ -77,7 +77,7 @@ class EvalRunner:
         start = time.monotonic()
         try:
             hits = self.retrieval.search(row.query, k=max(20, len(row.expected_pages) * 5))
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return False, f"exception: {exc!r}", int((time.monotonic() - start) * 1000)
         latency_ms = int((time.monotonic() - start) * 1000)
         if latency_ms > row.max_latency_ms:

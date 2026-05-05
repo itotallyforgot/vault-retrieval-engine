@@ -1,6 +1,6 @@
 import networkx as nx
 
-from vault_engine.community import compute_communities, communities_summary
+from vault_engine.community import communities_summary, compute_communities
 
 
 def test_compute_communities_returns_node_to_cid_map():

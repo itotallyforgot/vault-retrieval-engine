@@ -126,7 +126,7 @@ class _RetrievalGraphMixin:
 
 
 def _retrieval_graph_walk(
-    self: "Retrieval",
+    self: Retrieval,
     seeds: list[str],
     depth: int | None = None,
 ) -> list[list[str]]:
@@ -135,11 +135,11 @@ def _retrieval_graph_walk(
 
 
 def _retrieval_multi_hop(
-    self: "Retrieval",
+    self: Retrieval,
     seed_query: str,
     min_seeds_touched: int = 2,
     depth: int | None = None,
-) -> "MultiHopResult":
+) -> MultiHopResult:
     """Find seed pages via semantic search, then BFS for paths that touch >= min_seeds."""
     depth = depth or self.cfg.graph_max_depth
     hits = self.search(seed_query, k=self.cfg.semantic_top_k)
@@ -158,7 +158,7 @@ Retrieval.graph_walk = _retrieval_graph_walk  # type: ignore[attr-defined]
 Retrieval.multi_hop = _retrieval_multi_hop  # type: ignore[attr-defined]
 
 
-def topology_walk(graph_store: "GraphStore", seed: str, depth: int = 3) -> list[RankedHit]:
+def topology_walk(graph_store: GraphStore, seed: str, depth: int = 3) -> list[RankedHit]:
     """BFS from seed over outbound edges; closer nodes rank higher.
 
     Follows wikilink direction (page-mentions -> page-mentioned), so the walk

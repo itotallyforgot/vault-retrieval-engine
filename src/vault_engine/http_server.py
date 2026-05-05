@@ -32,7 +32,7 @@ def build_app(svc: Service, *, secret: str | None) -> FastAPI:
         try:
             verify_token(token, secret=secret)
         except TokenError as e:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e)) from e
 
     @app.get("/health")
     def health() -> dict:

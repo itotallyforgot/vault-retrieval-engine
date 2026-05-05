@@ -1,6 +1,6 @@
-from vault_engine.service import Service
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
+from vault_engine.service import Service
 
 
 def test_service_starts_and_stops_cleanly(sample_vault, tmp_path):

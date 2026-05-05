@@ -15,7 +15,6 @@ import networkx as nx
 from vault_engine.community import annotate_graph_with_communities
 from vault_engine.vault_reader import Page, build_alias_map
 
-
 ALLOWED_EDGE_TYPES: frozenset[str] = frozenset({"EXTRACTED", "INFERRED", "AMBIGUOUS"})
 
 

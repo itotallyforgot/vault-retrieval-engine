@@ -19,13 +19,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 import trafilatura
-
 
 _DEFAULT_USER_AGENT = "vault-engine/0.1 (+https://github.com/itotallyforgot/vault-retrieval-engine)"
 _DEFAULT_TIMEOUT_S = 15.0
@@ -120,7 +119,7 @@ def slugify_for_raw(title: str, on_date: date | None = None) -> str:
     filesystem limits (255 chars on most filesystems; we cap the slug at 100
     so callers have room for `.md` and any path prefix).
     """
-    on_date = on_date or datetime.now(tz=timezone.utc).date()
+    on_date = on_date or datetime.now(tz=UTC).date()
     slug = title.lower()
     # Drop in-word punctuation (apostrophes, smart quotes) BEFORE collapsing
     # word separators to hyphens — otherwise "what's" becomes "what-s".
@@ -191,7 +190,7 @@ def write_raw_file(
         article.body.strip(),
         "",
     ]
-    target.write_text("\n".join(fm_lines + [""] + body_lines), encoding="utf-8")
+    target.write_text("\n".join([*fm_lines, "", *body_lines]), encoding="utf-8")
     return target
 
 
@@ -201,7 +200,7 @@ def _date_from_clipped_at(clipped_at: str) -> date:
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", clipped_at)
     if m:
         return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    return datetime.now(tz=timezone.utc).date()
+    return datetime.now(tz=UTC).date()
 
 
 def _yaml_escape(s: str) -> str:
@@ -233,7 +232,7 @@ def add_url(
             author=article.author,
             published=article.published,
         )
-    clipped_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    clipped_at = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     return write_raw_file(
         vault_path=vault_path,
         article=article,

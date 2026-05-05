@@ -1,12 +1,11 @@
+import jwt
 import pytest
 from fastapi.testclient import TestClient
-import jwt
 
-from vault_engine.http_server import build_app
-from vault_engine.service import Service
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
-
+from vault_engine.http_server import build_app
+from vault_engine.service import Service
 
 SECRET = "test-secret-do-not-use-in-prod-padding"  # 38 bytes for HS256
 

@@ -180,7 +180,7 @@ def test_indexer_rebuild_emits_inferred_edges(sample_vault: Path, tmp_path: Path
         # At least one INFERRED edge must be present.
         assert "INFERRED" in edge_types.values()
         # All INFERRED edges must carry a confidence in [threshold, 1.0].
-        for (s, d), data in (
+        for (_s, _d), data in (
             ((s, d), idx.graph.graph.edges[s, d])
             for (s, d), t in edge_types.items()
             if t == "INFERRED"

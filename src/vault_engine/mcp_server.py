@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from mcp import types
 from mcp.server import Server

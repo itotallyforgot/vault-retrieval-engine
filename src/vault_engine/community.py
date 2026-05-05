@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import networkx as nx
 import community as community_louvain  # type: ignore[import-untyped]  # python-louvain package; no stubs
+import networkx as nx
 
 
 def compute_communities(graph: nx.Graph) -> dict[str, int]:

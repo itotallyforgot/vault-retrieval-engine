@@ -1,4 +1,4 @@
-from vault_engine.reranker import reciprocal_rank_fusion, RankedHit
+from vault_engine.reranker import RankedHit, reciprocal_rank_fusion
 
 
 def test_rrf_merges_two_rankings():

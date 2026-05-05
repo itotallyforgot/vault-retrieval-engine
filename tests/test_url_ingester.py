@@ -14,7 +14,6 @@ from vault_engine.url_ingester import (
     write_raw_file,
 )
 
-
 GOLDEN_HTML = """<!DOCTYPE html>
 <html>
   <head>

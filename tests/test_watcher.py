@@ -1,5 +1,5 @@
-from pathlib import Path
 import time
+from pathlib import Path
 
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder

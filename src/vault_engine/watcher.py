@@ -7,10 +7,10 @@ layer in P2); here we just dedupe rapid duplicates within a small window.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from threading import Lock
-import time
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer

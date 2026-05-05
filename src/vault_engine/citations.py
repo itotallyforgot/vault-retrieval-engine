@@ -9,6 +9,7 @@ Also provides graph-based citation chain building via build_citation_chain.
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -102,7 +103,7 @@ class CitationAssembler:
 
 
 def build_citation_chain(
-    graph_store: "GraphStore",
+    graph_store: GraphStore,
     anchor: str,
     target: str,
     *,
@@ -123,7 +124,7 @@ def build_citation_chain(
     if len(path_nodes) - 1 > max_hops:
         return None
     hops: list[CitationHop] = []
-    for u, v in zip(path_nodes, path_nodes[1:]):
+    for u, v in itertools.pairwise(path_nodes):
         edata = G.edges[u, v]
         hops.append(
             CitationHop(

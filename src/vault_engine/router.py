@@ -7,7 +7,7 @@ Router: fans out to vector + topology channels, fuses via RRF.
 from __future__ import annotations
 
 import re
-from enum import Enum
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from vault_engine.reranker import FusedHit, RankedHit, reciprocal_rank_fusion
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from vault_engine.stores.vec_store import VecStore
 
 
-class QueryMode(str, Enum):
+class QueryMode(StrEnum):
     LOOKUP = "lookup"
     SEMANTIC = "semantic"
     MULTI_HOP = "multi_hop"
@@ -99,10 +99,10 @@ class Router:
     def __init__(
         self,
         *,
-        cfg: "EngineConfig",
-        embedder: "Embedder",
-        vec_store: "VecStore",
-        graph_store: "GraphStore",
+        cfg: EngineConfig,
+        embedder: Embedder,
+        vec_store: VecStore,
+        graph_store: GraphStore,
     ) -> None:
         self.cfg = cfg
         self.embedder = embedder

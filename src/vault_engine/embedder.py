@@ -13,7 +13,6 @@ from typing import Protocol
 
 import numpy as np
 
-
 _KNOWN_DIMS = {
     "mixedbread-ai/mxbai-embed-large-v1": 1024,
     "nomic-ai/nomic-embed-text-v1.5": 768,
@@ -57,8 +56,8 @@ class SentenceTransformerEmbedder:
     """Real embedder using sentence-transformers; CUDA when available."""
 
     def __init__(self, model_name: str) -> None:
-        from sentence_transformers import SentenceTransformer  # local import (heavy)
         import torch
+        from sentence_transformers import SentenceTransformer  # local import (heavy)
 
         self.model_name = model_name
         self.dim = embed_dim_for_model(model_name)

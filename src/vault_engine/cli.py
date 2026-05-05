@@ -167,7 +167,7 @@ def eval_cmd(
     threshold: float = typer.Option(
         None,
         "--threshold",
-        help="Pass-rate threshold (0.0–1.0). Exit code 1 if passed/total < threshold.",
+        help="Pass-rate threshold (0.0-1.0). Exit code 1 if passed/total < threshold.",
     ),
 ) -> None:
     """Run the eval fixture suite against the engine."""
@@ -335,10 +335,7 @@ def hook_install(
         dst_script.chmod(0o755)
 
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    if settings_path.exists():
-        existing = json.loads(settings_path.read_text())
-    else:
-        existing = {}
+    existing = json.loads(settings_path.read_text()) if settings_path.exists() else {}
 
     pre_tool = existing.setdefault("hooks", {}).setdefault("PreToolUse", [])
     new_entries = settings_addition["hooks"]["PreToolUse"]

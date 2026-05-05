@@ -1,7 +1,7 @@
-import pytest
 import jwt
-from vault_engine.auth import verify_token, TokenError
+import pytest
 
+from vault_engine.auth import TokenError, verify_token
 
 SECRET = "test-secret-do-not-use-in-prod-padding"  # 38 bytes, satisfies HS256 RFC 7518
 WRONG_SECRET = "another-test-secret-also-padded-32b"  # 35 bytes

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from vault_engine.citations import CitationAssembler, Citation
+from vault_engine.citations import Citation, CitationAssembler
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer
