@@ -17,6 +17,10 @@ concurrency:
 
 jobs:
   scorecard:
+    # OSSF Scorecard's anonymous-checkout pattern fails on private repos.
+    # Skip until the repo flips public; the scheduled cron + push-to-main
+    # paths will then start producing scorecards.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       security-events: write
