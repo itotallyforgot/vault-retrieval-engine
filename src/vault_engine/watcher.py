@@ -66,6 +66,10 @@ class _Handler(FileSystemEventHandler):
 
     def on_moved(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
+            # Emit BOTH paths: src so the indexer can drop the old slug's
+            # chunks (file no longer exists at src), dest so it indexes the
+            # new location. Without the src emit, rename leaks stale chunks.
+            self._maybe_emit(event.src_path)
             self._maybe_emit(event.dest_path)
 
     def on_deleted(self, event: FileSystemEvent) -> None:

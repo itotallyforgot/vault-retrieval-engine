@@ -127,7 +127,11 @@ class VecStore:
         checksum: str,
         embedding: np.ndarray,
     ) -> bool:
-        """Insert or replace. Returns True if changed, False if unchanged."""
+        """Insert or replace. Returns True if changed, False if unchanged.
+
+        Wrapped in a transaction so a crash mid-write never leaves chunks
+        and chunk_meta out of sync.
+        """
         assert self._conn is not None
         cur = self._conn.execute(
             "SELECT checksum, rowid FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
@@ -138,37 +142,41 @@ class VecStore:
             return False
 
         blob = self._serialize(embedding)
-        if row:
-            existing_rowid = row[1]
-            self._conn.execute("DELETE FROM chunks WHERE rowid=?", (existing_rowid,))
-            self._conn.execute(
-                "DELETE FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
-                (page_slug, chunk_idx),
+        with self._conn:
+            if row:
+                existing_rowid = row[1]
+                self._conn.execute("DELETE FROM chunks WHERE rowid=?", (existing_rowid,))
+                self._conn.execute(
+                    "DELETE FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
+                    (page_slug, chunk_idx),
+                )
+            cur = self._conn.execute(
+                "INSERT INTO chunks(embedding, page_slug, chunk_idx, content, checksum) VALUES(?, ?, ?, ?, ?)",
+                (blob, page_slug, chunk_idx, content, checksum),
             )
-        cur = self._conn.execute(
-            "INSERT INTO chunks(embedding, page_slug, chunk_idx, content, checksum) VALUES(?, ?, ?, ?, ?)",
-            (blob, page_slug, chunk_idx, content, checksum),
-        )
-        new_rowid = cur.lastrowid
-        self._conn.execute(
-            "INSERT INTO chunk_meta(page_slug, chunk_idx, checksum, rowid) VALUES(?, ?, ?, ?)",
-            (page_slug, chunk_idx, checksum, new_rowid),
-        )
-        self._conn.commit()
+            new_rowid = cur.lastrowid
+            self._conn.execute(
+                "INSERT INTO chunk_meta(page_slug, chunk_idx, checksum, rowid) VALUES(?, ?, ?, ?)",
+                (page_slug, chunk_idx, checksum, new_rowid),
+            )
         return True
 
     def delete_page(self, page_slug: str) -> int:
+        """Drop every chunk for ``page_slug``. Wrapped in a transaction."""
         assert self._conn is not None
         cur = self._conn.execute("SELECT rowid FROM chunk_meta WHERE page_slug=?", (page_slug,))
         rowids = [r[0] for r in cur.fetchall()]
-        for rid in rowids:
-            self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rid,))
-        self._conn.execute("DELETE FROM chunk_meta WHERE page_slug=?", (page_slug,))
-        self._conn.commit()
+        with self._conn:
+            for rid in rowids:
+                self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rid,))
+            self._conn.execute("DELETE FROM chunk_meta WHERE page_slug=?", (page_slug,))
         return len(rowids)
 
     def delete_chunk(self, page_slug: str, chunk_idx: int) -> bool:
-        """Drop a single chunk. Returns True if a row was removed, False if absent."""
+        """Drop a single chunk. Returns True if a row was removed, False if absent.
+
+        Wrapped in a transaction.
+        """
         assert self._conn is not None
         cur = self._conn.execute(
             "SELECT rowid FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
@@ -178,12 +186,12 @@ class VecStore:
         if row is None:
             return False
         rowid = row[0]
-        self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rowid,))
-        self._conn.execute(
-            "DELETE FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
-            (page_slug, chunk_idx),
-        )
-        self._conn.commit()
+        with self._conn:
+            self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rowid,))
+            self._conn.execute(
+                "DELETE FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
+                (page_slug, chunk_idx),
+            )
         return True
 
     def iter_chunks_for_page(self, page_slug: str) -> list[tuple[int, np.ndarray]]:

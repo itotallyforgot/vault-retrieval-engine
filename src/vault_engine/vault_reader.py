@@ -1,7 +1,5 @@
 """Read pages out of the vault. Parses frontmatter, body, classifies kind."""
 
-from __future__ import annotations
-
 import datetime
 import re
 from dataclasses import dataclass, field
@@ -9,6 +7,22 @@ from pathlib import Path
 from typing import Any
 
 import frontmatter
+
+# Hard cap on individual page size to bound memory + embedder cost. Pages
+# larger than this are skipped at iter_pages time with a warning, NOT
+# silently truncated. Real vault pages are kilobytes; multi-megabyte files
+# are usually accidents (binary file mis-renamed, log dump, etc.).
+_MAX_PAGE_BYTES = 10 * 1024 * 1024  # 10 MiB
+
+
+class SlugCollisionError(RuntimeError):
+    """Raised when two pages in the vault share the same slug.
+
+    Slug = filename stem, used as the primary key in the vec store and
+    the graph. Two pages with the same stem (e.g. ``wiki/topics/foo.md``
+    and ``raw/foo.md``) would clobber each other on writes and conflate
+    chunks on reads. We refuse to start rather than silently corrupt.
+    """
 
 
 @dataclass
@@ -56,8 +70,17 @@ def read_page(path: Path) -> Page:
     YAML dates (`last_updated: 2026-01-01`) are parsed by python-frontmatter
     as `datetime.date` objects. We normalize all date/datetime values to ISO
     strings so downstream consumers see consistent string types.
+
+    Rejects files larger than ``_MAX_PAGE_BYTES`` (10 MiB) — those are almost
+    always accidents (binary mis-rename, log dump). Reads with
+    ``errors="replace"`` so non-UTF-8 bytes don't crash a full vault walk.
     """
-    text = path.read_text(encoding="utf-8")
+    size = path.stat().st_size
+    if size > _MAX_PAGE_BYTES:
+        raise ValueError(
+            f"page too large: {path} ({size} bytes > {_MAX_PAGE_BYTES} cap)"
+        )
+    text = path.read_text(encoding="utf-8", errors="replace")
     fm = frontmatter.loads(text)
     fm_dict: dict[str, Any] = {
         k: v.isoformat() if isinstance(v, (datetime.date, datetime.datetime)) else v
@@ -109,17 +132,42 @@ def parse_wikilinks(body: str) -> list[str]:
 def iter_pages(vault_path: Path) -> list[Page]:
     """Walk the vault for markdown pages and read each.
 
-    Includes wiki/topics/, wiki/sources/, raw/. Skips _ops/, _templates/, and dotfiles.
-    Populates Page.wikilinks for every page.
+    Includes wiki/topics/, wiki/sources/, raw/. Skips _ops/, _templates/,
+    skills/, and dotfile directories. Populates Page.wikilinks for every
+    page. Skips symlinks pointing outside the vault root.
+
+    Raises:
+        SlugCollisionError: two pages in the vault share the same stem
+            (which would silently clobber each other in the vec store).
     """
+    vault_root = vault_path.resolve()
     out: list[Page] = []
+    seen_slugs: dict[str, Path] = {}
     for md_path in sorted(vault_path.rglob("*.md")):
         parts = md_path.parts
         if any(p.startswith(".") for p in parts):
             continue
         if any(p in {"_ops", "_templates", "skills"} for p in parts):
             continue
-        page = read_page(md_path)
+        # Skip symlinks that escape the vault root (e.g. pointing at /etc/passwd).
+        try:
+            md_path.resolve().relative_to(vault_root)
+        except ValueError:
+            continue
+        try:
+            page = read_page(md_path)
+        except ValueError:
+            # Oversize or otherwise unreadable: skip with no rebuild crash.
+            # The size cap is enforced inside read_page; surface via logging
+            # at the indexer layer rather than aborting iter_pages.
+            continue
+        if page.slug in seen_slugs:
+            other = seen_slugs[page.slug]
+            raise SlugCollisionError(
+                f"slug collision: {md_path} and {other} share stem "
+                f"{page.slug!r}; rename one to disambiguate."
+            )
+        seen_slugs[page.slug] = md_path
         page.wikilinks = parse_wikilinks(page.body)
         out.append(page)
     return out

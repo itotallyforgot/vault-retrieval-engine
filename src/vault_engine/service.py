@@ -119,8 +119,15 @@ class Service:
     # ------------------------------------------------------------------
 
     def _on_change(self, path: Path) -> None:
-        """Re-index a single file after a filesystem change (called from watcher thread)."""
+        """Re-index a single file after a filesystem change (called from watcher thread).
+
+        Bails out if the service was stopped between the watchdog event firing
+        and this callback acquiring the service lock; otherwise we'd call
+        ``self.indexer.reindex_page(path)`` against a closed indexer.
+        """
         with self._lock:
+            if not self._running:
+                return
             log.debug("Reindexing %s", path)
             try:
                 self.indexer.reindex_page(path)
