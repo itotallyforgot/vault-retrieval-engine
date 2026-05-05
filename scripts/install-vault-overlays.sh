@@ -8,15 +8,24 @@
 #   ./scripts/install-vault-overlays.sh --vault /path/to/vault [--dry-run]
 #
 # Overlays installed:
-#   - skills/vault/synth.md   — engine-aware insight synthesis skill
-#   - skills/vault/crawl.md   — engine-aware URL → raw/ scrape skill
-#   - .githooks/post-commit   — auto-reindex hook (fires after every commit)
+#   - skills/vault/synth.md                          — engine-aware insight synthesis skill
+#   - skills/vault/crawl.md                          — engine-aware URL → raw/ scrape skill
+#   - .githooks/post-commit                          — vault-owned dispatcher (only if absent
+#                                                       or matches the legacy monolithic engine
+#                                                       hook from before the .d/ refactor)
+#   - .githooks/post-commit.d/10-vault-engine.sh     — engine's reindex piece
 #
 # Pre-requisites for full function (skills are scaffolding either way):
 #   - Vault has a 'skills/vault/' bundle conforming to the second-brain pattern.
 #   - Vault is git-tracked (.git/ exists) for the post-commit hook to fire.
-#   - vault-engine is on PATH for the post-commit hook to do its job;
-#     the hook is graceful no-op when not.
+#   - vault-engine is on PATH for the engine plug-in piece to do its job;
+#     the plug-in is a graceful no-op when not.
+#
+# Dispatcher safety:
+#   - If the vault already has a custom (non-engine, non-dispatcher)
+#     post-commit, this script REFUSES to overwrite. The operator is
+#     told to manually adopt the dispatcher pattern; the engine plug-in
+#     piece is still installed in .d/ so manual adoption is one-line.
 #
 # After install, point git at the vault's .githooks/ directory:
 #   git -C <vault> config core.hooksPath .githooks
@@ -92,7 +101,64 @@ install_file() {
 
 install_file "$overlay_dir/skills/vault/synth.md" "$vault/skills/vault/synth.md"
 install_file "$overlay_dir/skills/vault/crawl.md" "$vault/skills/vault/crawl.md"
-install_file "$overlay_dir/githooks/post-commit" "$vault/.githooks/post-commit" "755"
+
+# --- post-commit dispatcher + engine plug-in piece -------------------------
+#
+# Two-part install:
+#
+#   1. The dispatcher (`.githooks/post-commit`) is owned by the vault, not
+#      the engine. We install it only if absent OR if the existing file is
+#      the legacy monolithic engine hook (from before the .d/ refactor).
+#      Custom user-edited dispatchers are NEVER overwritten.
+#
+#   2. The engine plug-in (`.githooks/post-commit.d/10-vault-engine.sh`)
+#      is the only thing the engine has full ownership of.
+#
+# Legacy detection compares against the SHA256 of the pre-refactor body.
+# If the vault has been migrated and the dispatcher hand-edited, this is
+# a "custom" file from our PoV and we leave it alone, dropping a `.bak`
+# of the legacy file when we DO replace.
+
+# SHA256 of the legacy monolithic post-commit body (overlays/githooks/post-commit
+# at commit 3aa35ad, before this slice). Used to safely auto-replace.
+LEGACY_HOOK_SHA="b68cfa92f1266193ecb47c88035ac1358c361c527dcf5b465bc4959bba02fb69"
+
+install_dispatcher() {
+  local src="$overlay_dir/githooks/post-commit"
+  local dest="$vault/.githooks/post-commit"
+
+  if [[ ! -e "$dest" ]]; then
+    install_file "$src" "$dest" "755"
+    return
+  fi
+
+  if cmp -s "$src" "$dest"; then
+    echo "  [skip] $dest (already dispatcher)"
+    return
+  fi
+
+  # Could be the legacy monolithic engine hook → safe to replace.
+  local existing_sha
+  existing_sha=$(shasum -a 256 "$dest" 2>/dev/null | awk '{print $1}')
+  if [[ "$existing_sha" == "$LEGACY_HOOK_SHA" ]]; then
+    echo "  [migrate] $dest (replacing legacy monolithic hook with dispatcher)"
+    if [[ $dry_run -eq 0 ]]; then
+      cp "$dest" "$dest.legacy.bak"
+      cp "$src" "$dest"
+      chmod 755 "$dest"
+    fi
+    return
+  fi
+
+  # Anything else is user-customized → never clobber.
+  echo "  [skip] $dest (custom file; refusing to overwrite)"
+  echo "         To adopt the dispatcher pattern, see overlays/githooks/post-commit"
+  echo "         and ensure your hook walks .githooks/post-commit.d/*"
+}
+
+install_dispatcher
+install_file "$overlay_dir/githooks/post-commit.d/10-vault-engine.sh" \
+             "$vault/.githooks/post-commit.d/10-vault-engine.sh" "755"
 
 echo
 if [[ $dry_run -eq 1 ]]; then
