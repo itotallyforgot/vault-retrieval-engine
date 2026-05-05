@@ -97,3 +97,26 @@ jobs:
             --fixtures tests/fixtures/eval_fixtures.jsonl \
             --embedder mock \
             --threshold 0.85
+
+  overlay-install-smoke:
+    # Validates scripts/install-vault-overlays.sh against synthetic vaults
+    # so future regressions in the legacy-monolithic-hook auto-migration
+    # are caught at PR time rather than when an operator runs the installer
+    # against their real vault.
+    #
+    # Pure bash + git; no engine deps. Runs in seconds.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Configure git identity (smoke harness uses git init)
+        run: |
+          git config --global user.email ci@example.invalid
+          git config --global user.name "CI"
+          git config --global init.defaultBranch main
+      - name: Run overlay-install smoke harness
+        run: bash scripts/test-overlay-install.sh
