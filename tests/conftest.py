@@ -1,7 +1,11 @@
 """Shared pytest fixtures."""
+
 from pathlib import Path
 
 import pytest
+
+from vault_engine.embedder import MockEmbedder
+from vault_engine.stores.graph_store import GraphStore
 
 
 @pytest.fixture
@@ -15,9 +19,9 @@ def sample_vault(tmp_path: Path) -> Path:
     (vault / "wiki" / "topics" / "alpha.md").write_text(
         "---\n"
         "title: Alpha\n"
-        "aliases: [\"alpha-thing\"]\n"
+        'aliases: ["alpha-thing"]\n'
         "tags: [topic]\n"
-        "sources: [\"[[2026-01-01-alpha-source]]\"]\n"
+        'sources: ["[[2026-01-01-alpha-source]]"]\n'
         "last_updated: 2026-01-01\n"
         "---\n"
         "\n"
@@ -59,12 +63,17 @@ def sample_vault(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (vault / "raw" / "2026-01-01-alpha-raw.md").write_text(
-        "---\n"
-        "title: Alpha Raw\n"
-        "ingested: true\n"
-        "---\n"
-        "\n"
-        "Raw text body.\n",
+        "---\ntitle: Alpha Raw\ningested: true\n---\n\nRaw text body.\n",
         encoding="utf-8",
     )
     return vault
+
+
+@pytest.fixture
+def mock_embedder() -> MockEmbedder:
+    return MockEmbedder(dim=64)
+
+
+@pytest.fixture
+def empty_graph_store() -> GraphStore:
+    return GraphStore()
