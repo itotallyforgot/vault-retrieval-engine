@@ -208,6 +208,70 @@ case_rerun_idempotent() {
   rm -rf "$v" "$log1" "$log2"
 }
 
+# --- case 5: broken engine surfaces loudly (OGR-71) ------------------------
+
+case_engine_broken() {
+  echo "== case-engine-broken =="
+  local v
+  v=$(mktemp -d)
+  setup_vault "$v"
+  bash "$INSTALLER" --vault "$v" >/dev/null 2>&1
+  # Installer copies the hook source but doesn't chmod +x (it's already +x
+  # in the source tree); ensure the synthetic vault has executable bits.
+  chmod 755 "$v/.githooks/post-commit" "$v/.githooks/post-commit.d/10-vault-engine.sh"
+  ( cd "$v" && git config core.hooksPath .githooks )
+
+  # Plant a fake vault-engine that mimics the OGR-71 ModuleNotFoundError
+  # symptom: prints traceback to stderr, exits non-zero.
+  local shim_dir
+  shim_dir=$(mktemp -d)
+  cat > "$shim_dir/vault-engine" <<'SHIM'
+#!/usr/bin/env bash
+printf 'Traceback (most recent call last):\n' >&2
+printf "  ModuleNotFoundError: No module named 'vault_engine'\n" >&2
+exit 1
+SHIM
+  chmod 755 "$shim_dir/vault-engine"
+
+  # Trigger a commit so post-commit fires.
+  local commit_log
+  commit_log=$(mktemp)
+  ( cd "$v" && PATH="$shim_dir:$PATH" git commit --allow-empty -m "trigger reindex" \
+      --quiet >"$commit_log" 2>&1 )
+
+  # Hook backgrounds the work. Wait for marker to land (cap ~5s).
+  local marker="$v/.git/.engine-broken"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [[ -f "$marker" ]] && break
+    sleep 0.5
+  done
+
+  assert_file_present "marker file written on engine failure"  "$marker"
+  if [[ -f "$marker" ]]; then
+    assert_grep "marker records exit code"           "exit=1"               "$marker"
+    assert_grep "marker captures error output"       "ModuleNotFoundError"  "$marker"
+  fi
+  # The backgrounded subshell writes to the parent's stderr, which git
+  # commit's `2>&1` redirection captured into commit_log.
+  assert_grep "loud stderr warning visible"          "FAILED"               "$commit_log"
+  assert_grep "loud stderr names the marker"         "engine-broken"        "$commit_log"
+
+  # Recovery: swap shim to a working stub. Marker should be cleaned up.
+  cat > "$shim_dir/vault-engine" <<'SHIM'
+#!/usr/bin/env bash
+exit 0
+SHIM
+  ( cd "$v" && PATH="$shim_dir:$PATH" git commit --allow-empty -m "recovery" \
+      --quiet >/dev/null 2>&1 )
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    [[ ! -f "$marker" ]] && break
+    sleep 0.5
+  done
+  assert_file_absent "marker removed after engine recovery"    "$marker"
+
+  rm -rf "$v" "$shim_dir" "$commit_log"
+}
+
 # --- main ------------------------------------------------------------------
 
 if [[ ! -x "$INSTALLER" ]]; then
@@ -223,6 +287,7 @@ case_fresh
 case_legacy_monolithic
 case_custom_hook
 case_rerun_idempotent
+case_engine_broken
 
 echo
 echo "summary: $PASS passed, $FAIL failed"
