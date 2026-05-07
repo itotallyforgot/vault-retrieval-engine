@@ -83,7 +83,7 @@ git merge -q --no-ff demo/slice-b -m "merge: slice-b"
 # Verify both edits present, no conflict markers, file integrity intact.
 grep -q "user and password required" src/auth.py
 grep -q "Auth lives in" docs/README.md
-if grep -RIn '<<<<<<<\|=======\|>>>>>>>' . --exclude-dir=.git --exclude-dir=.worktrees 2>/dev/null; then
+if grep -RInE '<{7}|={7}|>{7}' . --exclude-dir=.git --exclude-dir=.worktrees 2>/dev/null; then
   echo "FAIL: conflict markers found" >&2
   exit 1
 fi
