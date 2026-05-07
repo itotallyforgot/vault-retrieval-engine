@@ -65,6 +65,13 @@ def test_query_endpoint_returns_fused_hits(app_no_auth):
     assert "fused_hits" in data
 
 
+def test_query_endpoint_preserves_lookup_intent_for_exact_title(app_no_auth):
+    client = TestClient(app_no_auth)
+    r = client.post("/query", json={"q": "Alpha"})
+    assert r.status_code == 200
+    assert r.json()["intent"] == "lookup"
+
+
 def test_query_with_auth_rejects_missing_token(app_with_auth):
     client = TestClient(app_with_auth)
     r = client.post("/query", json={"q": "anything"})
