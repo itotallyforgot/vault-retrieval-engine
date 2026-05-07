@@ -181,18 +181,22 @@ Common knobs:
 
 The eval harness runs queries against a fixture file in JSONL. Each fixture asserts:
 
-- **Latency SLO** — `max_latency_ms` end-to-end per query
-- **Page coverage** — top-k results must include named pages (e.g., `expected_pages: ["alpha", "beta"]`)
-- **Mode classification** — query routes correctly: `lookup`, `semantic`, `multi_hop`, or `hybrid`
-- **Citation depth** — `min_citation_depth` lower bound on chunk → page → source chain length
+- **Latency SLO:** `max_latency_ms` end-to-end per query
+- **Page coverage:** top-k results must include named pages (e.g., `expected_pages: ["alpha", "beta"]`)
+- **Negative coverage:** top-k results must not include named pages (e.g., `forbidden_pages: ["orphan"]`)
+- **Mode classification:** query routes correctly: `lookup`, `semantic`, `multi_hop`, or `hybrid`
+- **Citation depth:** `min_citation_depth` lower bound on chunk -> page -> source chain length
+- **Citation correctness:** `expected_citations` must appear in the assembled citation chain
+- **Eval track:** optional `track` groups rows by claim type, such as `retrieval_coverage` or `verification`
+- **Candidate window:** optional `top_k` narrows the result set for negative coverage checks
 
 Sample fixture entry shape:
 
 ```jsonl
-{"id": "lookup-alpha", "query": "alpha", "expected_pages": ["alpha"], "min_citation_depth": 0, "mode": "lookup", "max_latency_ms": 5000}
+{"id": "source-citation-alpha", "query": "alpha source provenance", "expected_pages": ["alpha", "2026-01-01-alpha-source"], "expected_citations": ["2026-01-01-alpha-source"], "min_citation_depth": 1, "mode": "hybrid", "track": "verification", "top_k": 20, "max_latency_ms": 5000}
 ```
 
-See `tests/fixtures/eval_fixtures.jsonl` for the full schema in use.
+The CLI report prints overall pass/fail plus latency buckets by `mode` and `track`. See `tests/fixtures/eval_fixtures.jsonl` for the full schema in use.
 
 CI runs the eval on every push using the mock embedder against `tests/fixtures/sample_vault`. Production runs use the real embedder against the real vault.
 
@@ -304,6 +308,6 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Status
 
-**v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 5 ADRs. Current local collection: 142 tests. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
+**v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 5 ADRs. Current local collection: 146 tests. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
 
 **Current status**: post-v0.1.0 hardening is tracked at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N). Recent work has landed in `main`; see the `Unreleased` section of [`CHANGELOG.md`](./CHANGELOG.md) for shipped slices and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for deferred items.
