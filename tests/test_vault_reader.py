@@ -61,6 +61,17 @@ def test_iter_pages_walks_wiki_and_raw(sample_vault):
     ]
 
 
+def test_iter_pages_allows_vault_under_dot_prefixed_parent(tmp_path: Path):
+    vault = tmp_path / ".worktrees" / "branch" / "vault"
+    topic_dir = vault / "wiki" / "topics"
+    topic_dir.mkdir(parents=True)
+    (topic_dir / "alpha.md").write_text("---\ntitle: Alpha\n---\n\n# Alpha\n", encoding="utf-8")
+
+    pages = list(iter_pages(vault))
+
+    assert [p.slug for p in pages] == ["alpha"]
+
+
 def test_build_alias_map_maps_titles_aliases_slugs(sample_vault):
     pages = list(iter_pages(sample_vault))
     alias_map = build_alias_map(pages)
