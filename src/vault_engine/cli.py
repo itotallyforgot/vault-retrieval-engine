@@ -214,6 +214,18 @@ def eval_cmd(
         console.print(f"total: {report.total}")
         console.print(f"[green]passed[/green]: {report.passed}")
         console.print(f"[red]failed[/red]: {report.failed}")
+        console.print("by mode:")
+        for mode, bucket in sorted(report.by_mode.items()):
+            console.print(
+                f"  {mode}: {bucket.passed}/{bucket.total} "
+                f"avg={bucket.avg_latency_ms}ms max={bucket.max_latency_ms}ms"
+            )
+        console.print("by track:")
+        for track, bucket in sorted(report.by_track.items()):
+            console.print(
+                f"  {track}: {bucket.passed}/{bucket.total} "
+                f"avg={bucket.avg_latency_ms}ms max={bucket.max_latency_ms}ms"
+            )
         for f in report.failures:
             console.print(f"  [red]{f.id}[/red] — {f.reason} ({f.latency_ms}ms)")
 
