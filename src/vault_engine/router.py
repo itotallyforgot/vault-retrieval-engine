@@ -166,9 +166,17 @@ class Router:
     # ------------------------------------------------------------------
 
     def _classify(self, query: str) -> QueryMode:
-        """Heuristic classification reusing the module-level classify()."""
-        # Pass empty known_titles; Router has no title registry by default.
-        return classify(query, known_titles=set())
+        """Heuristic classification using the current graph's slug/title/alias registry."""
+        known_titles: set[str] = set()
+        for node_id, data in self.graph_store.graph.nodes(data=True):
+            known_titles.add(str(node_id))
+            title = data.get("title")
+            if title:
+                known_titles.add(str(title))
+            aliases = data.get("aliases") or []
+            if isinstance(aliases, list):
+                known_titles.update(str(alias) for alias in aliases)
+        return classify(query, known_titles=known_titles)
 
     def _vector_search(self, query: str, *, top_k: int) -> list:
         """Run KNN search and return list[RankedHit]."""

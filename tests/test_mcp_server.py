@@ -59,3 +59,13 @@ def test_mcp_server_query_graph_returns_subgraph_text(sample_vault, tmp_path):
         assert "NODE" in text or "EDGE" in text or "No matching" in text
     finally:
         svc.stop()
+
+
+def test_mcp_server_query_graph_preserves_lookup_intent(sample_vault, tmp_path):
+    svc = _service(sample_vault, tmp_path)
+    try:
+        server = build_server(svc)
+        out = asyncio.run(server.call_tool_handler("query_graph", {"question": "Alpha"}))
+        assert "Intent: lookup" in out[0].text
+    finally:
+        svc.stop()
