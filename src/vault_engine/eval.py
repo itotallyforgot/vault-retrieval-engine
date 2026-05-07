@@ -27,6 +27,10 @@ class FixtureRow:
     min_citation_depth: int
     mode: str
     max_latency_ms: int
+    forbidden_pages: list[str] = field(default_factory=list)
+    expected_citations: list[str] = field(default_factory=list)
+    track: str | None = None
+    top_k: int | None = None
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> FixtureRow:
@@ -37,6 +41,10 @@ class FixtureRow:
             min_citation_depth=int(raw["min_citation_depth"]),
             mode=str(raw["mode"]),
             max_latency_ms=int(raw["max_latency_ms"]),
+            forbidden_pages=[str(p) for p in raw.get("forbidden_pages", [])],
+            expected_citations=[str(p) for p in raw.get("expected_citations", [])],
+            track=str(raw["track"]) if raw.get("track") else None,
+            top_k=int(raw["top_k"]) if raw.get("top_k") is not None else None,
         )
 
 
@@ -48,11 +56,37 @@ class FailureRecord:
 
 
 @dataclass
+class EvalBucket:
+    total: int = 0
+    passed: int = 0
+    failed: int = 0
+    total_latency_ms: int = 0
+    max_latency_ms: int = 0
+
+    @property
+    def avg_latency_ms(self) -> int:
+        if self.total == 0:
+            return 0
+        return int(self.total_latency_ms / self.total)
+
+    def record(self, *, ok: bool, latency_ms: int) -> None:
+        self.total += 1
+        if ok:
+            self.passed += 1
+        else:
+            self.failed += 1
+        self.total_latency_ms += latency_ms
+        self.max_latency_ms = max(self.max_latency_ms, latency_ms)
+
+
+@dataclass
 class EvalReport:
     total: int = 0
     passed: int = 0
     failed: int = 0
     failures: list[FailureRecord] = field(default_factory=list)
+    by_mode: dict[str, EvalBucket] = field(default_factory=dict)
+    by_track: dict[str, EvalBucket] = field(default_factory=dict)
 
 
 class EvalRunner:
@@ -76,6 +110,10 @@ class EvalRunner:
             row = FixtureRow.from_dict(json.loads(line))
             report.total += 1
             ok, reason, latency = self._run_row(row)
+            report.by_mode.setdefault(row.mode, EvalBucket()).record(ok=ok, latency_ms=latency)
+            report.by_track.setdefault(row.track or row.mode, EvalBucket()).record(
+                ok=ok, latency_ms=latency
+            )
             if ok:
                 report.passed += 1
             else:
@@ -86,7 +124,8 @@ class EvalRunner:
     def _run_row(self, row: FixtureRow) -> tuple[bool, str, int]:
         start = time.monotonic()
         try:
-            result = self.router.dispatch(row.query, top_k=max(20, len(row.expected_pages) * 5))
+            top_k = row.top_k or max(20, len(row.expected_pages) * 5)
+            result = self.router.dispatch(row.query, top_k=top_k)
         except Exception as exc:
             return False, f"exception: {exc!r}", int((time.monotonic() - start) * 1000)
         latency_ms = int((time.monotonic() - start) * 1000)
@@ -105,6 +144,9 @@ class EvalRunner:
         missing = [p for p in row.expected_pages if p not in slugs]
         if missing:
             return False, f"missing expected pages: {missing}", latency_ms
+        forbidden = sorted(set(row.forbidden_pages) & slugs)
+        if forbidden:
+            return False, f"forbidden pages retrieved: {forbidden}", latency_ms
 
         expected_slugs = set(row.expected_pages)
         citation_hits = [
@@ -118,6 +160,12 @@ class EvalRunner:
             if h.doc_id in expected_slugs
         ]
         citations = self.citations.assemble(citation_hits)
+        citation_slugs = {citation.page_slug for citation in citations}
+        missing_citations = [
+            citation for citation in row.expected_citations if citation not in citation_slugs
+        ]
+        if missing_citations:
+            return False, f"missing expected citations: {missing_citations}", latency_ms
         citation_depth = sum(1 for citation in citations if citation.raw_path is not None)
         if citation_depth < row.min_citation_depth:
             return (

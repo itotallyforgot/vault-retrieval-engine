@@ -1,6 +1,6 @@
 {"id": "lookup-alpha", "query": "alpha", "expected_pages": ["alpha"], "min_citation_depth": 0, "mode": "lookup", "max_latency_ms": 5000}
 {"id": "lookup-beta", "query": "beta", "expected_pages": ["beta"], "min_citation_depth": 0, "mode": "lookup", "max_latency_ms": 5000}
 {"id": "alias-zeta", "query": "Z-pattern broadcast", "expected_pages": ["zeta"], "min_citation_depth": 0, "mode": "lookup", "max_latency_ms": 5000}
-{"id": "semantic-gamma", "query": "gamma extends alpha with ranging", "expected_pages": ["gamma"], "min_citation_depth": 0, "mode": "semantic", "max_latency_ms": 5000}
-{"id": "multi-hop-gamma-alpha", "query": "gamma alpha", "expected_pages": ["gamma", "alpha"], "min_citation_depth": 0, "mode": "multi_hop", "max_latency_ms": 5000}
-{"id": "source-citation-alpha", "query": "alpha source provenance", "expected_pages": ["alpha", "2026-01-01-alpha-source"], "min_citation_depth": 1, "mode": "hybrid", "max_latency_ms": 5000}
+{"id": "semantic-gamma", "query": "gamma extends alpha with ranging", "expected_pages": ["gamma"], "forbidden_pages": ["orphan"], "min_citation_depth": 0, "mode": "semantic", "track": "retrieval_coverage", "top_k": 3, "max_latency_ms": 5000}
+{"id": "multi-hop-gamma-alpha", "query": "gamma alpha", "expected_pages": ["gamma", "alpha"], "forbidden_pages": ["beta"], "min_citation_depth": 0, "mode": "multi_hop", "track": "retrieval_coverage", "top_k": 7, "max_latency_ms": 5000}
+{"id": "source-citation-alpha", "query": "alpha source provenance", "expected_pages": ["alpha", "2026-01-01-alpha-source"], "expected_citations": ["2026-01-01-alpha-source"], "min_citation_depth": 1, "mode": "hybrid", "track": "verification", "max_latency_ms": 5000}
