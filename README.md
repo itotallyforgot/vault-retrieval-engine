@@ -304,6 +304,6 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Status
 
-**v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 5 ADRs. Current local collection: 140 tests. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
+**v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 5 ADRs. Current local collection: 142 tests. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
 
 **Current status**: post-v0.1.0 hardening is tracked at the [v0.2.0 hardening epic](https://linear.app/ogre-labs/issue/OGR-19). Recent work has landed in `main`; see the `Unreleased` section of [`CHANGELOG.md`](./CHANGELOG.md) for shipped slices and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for deferred items.

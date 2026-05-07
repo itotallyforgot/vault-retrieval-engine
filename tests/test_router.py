@@ -15,6 +15,14 @@ def test_classify_multi_hop_when_query_is_multiple_known_entities():
     assert classify("gamma alpha", {"alpha", "gamma"}) == QueryMode.MULTI_HOP
 
 
+def test_classify_multi_hop_when_query_mentions_multi_word_entity_pair():
+    assert classify("claude code alpha", {"alpha", "claude code"}) == QueryMode.MULTI_HOP
+
+
+def test_classify_semantic_when_known_entities_appear_in_prose():
+    assert classify("gamma extends alpha with ranging", {"alpha", "gamma"}) == QueryMode.SEMANTIC
+
+
 def test_classify_hybrid_when_known_entity_asks_for_source_provenance():
     assert classify("alpha source provenance", {"alpha"}) == QueryMode.HYBRID
 

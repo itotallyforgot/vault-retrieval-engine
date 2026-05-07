@@ -61,6 +61,7 @@ _RELATION_RE = re.compile(
 )
 
 _PROVENANCE_WORDS = {"citation", "citations", "provenance", "source", "sources"}
+_ENTITY_PAIR_CONNECTORS = {"and", "or", "to"}
 
 # Heuristic length threshold for "hybrid" (semantic + graph) tier.
 _HYBRID_TOKEN_THRESHOLD = 8
@@ -81,6 +82,12 @@ def classify(query: str, known_titles: set[str]) -> QueryMode:
     provenance_query = any(token in _PROVENANCE_WORDS for token in tokens)
     if mentioned and provenance_query:
         return QueryMode.HYBRID
+    if len(mentioned) >= 2:
+        remainder = q
+        for title in sorted(mentioned, key=len, reverse=True):
+            remainder = re.sub(rf"\b{re.escape(title)}\b", " ", remainder)
+        if all(token in _ENTITY_PAIR_CONNECTORS for token in remainder.split()):
+            return QueryMode.MULTI_HOP
     if len(mentioned) >= 2 and all(token in known for token in tokens):
         return QueryMode.MULTI_HOP
     if len(mentioned) == 1 and len(tokens) <= 4:

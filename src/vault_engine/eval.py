@@ -16,7 +16,7 @@ from typing import Any
 from vault_engine.citations import CitationAssembler
 from vault_engine.config import EngineConfig
 from vault_engine.retrieval import Retrieval, SearchHit
-from vault_engine.router import Router
+from vault_engine.router import QueryMode, Router
 
 
 @dataclass
@@ -94,7 +94,9 @@ class EvalRunner:
             return False, f"latency exceeded: {latency_ms}ms > {row.max_latency_ms}ms", latency_ms
 
         intent = result.get("intent")
-        actual_mode = intent.value if hasattr(intent, "value") else str(intent)
+        if intent is None:
+            return False, "missing intent in router result", latency_ms
+        actual_mode = intent.value if isinstance(intent, QueryMode) else str(intent)
         if row.mode and actual_mode != row.mode:
             return False, f"wrong intent: expected {row.mode}, got {actual_mode}", latency_ms
 
@@ -104,6 +106,7 @@ class EvalRunner:
         if missing:
             return False, f"missing expected pages: {missing}", latency_ms
 
+        expected_slugs = set(row.expected_pages)
         citation_hits = [
             SearchHit(
                 page_slug=h.doc_id,
@@ -112,6 +115,7 @@ class EvalRunner:
                 distance=h.rrf_score,
             )
             for h in fused_hits
+            if h.doc_id in expected_slugs
         ]
         citations = self.citations.assemble(citation_hits)
         citation_depth = sum(1 for citation in citations if citation.raw_path is not None)
