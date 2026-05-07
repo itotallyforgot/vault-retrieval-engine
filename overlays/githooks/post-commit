@@ -1,27 +1,52 @@
 #!/usr/bin/env bash
-# vault-engine post-commit reindex hook (overlay).
+# Vault post-commit dispatcher.
 #
-# Installed by `scripts/install-vault-overlays.sh` into a target vault's
-# .githooks/post-commit. Fires `vault-engine reindex` after every commit
-# in the vault so the engine's vec store + graph stay current.
+# Owned by the vault, NOT by any plug-in. Fires every executable file in
+# `.githooks/post-commit.d/` after each commit. Plug-ins (vault-engine,
+# lifestyle stack, future integrations) drop their own `<NN>-<plugin>.sh`
+# script in that directory; the dispatcher walks them in lexical order
+# so numeric prefixes (10-, 20-, …) define run sequence.
 #
-# Designed to be a graceful no-op when:
-#   - vault-engine is not on PATH (engine uninstalled)
-#   - the engine's reindex command exits non-zero (silent in-background)
+# Contract for plug-in scripts:
+#   - exit 0 means success; non-zero exits are LOGGED but do NOT abort
+#     the dispatcher (each plug-in is independent of the others)
+#   - background work is fine; foreground work should be cheap (<1s)
+#     because every commit pays the wait
+#   - never edit the working tree — post-commit fires after the commit
+#     is sealed, and creating new commits from inside the hook causes
+#     loops or surprises
 #
-# This means the hook is safe to keep installed even after engine removal,
-# and the vault stays usable in standalone mode.
+# Designed to be a no-op when no plug-ins are installed. Safe to keep
+# even after every plug-in is removed.
 
 set -u
 
-# Find the vault root via git (the hook runs from .git/hooks).
+# Find the vault root via git so plug-ins can rely on a consistent CWD.
 VAULT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -z "$VAULT_ROOT" ] && exit 0
+export VAULT_ROOT
+cd "$VAULT_ROOT" || exit 0
 
-# Background reindex; mute output so the commit operation isn't slowed
-# or noisy. Failure is non-fatal — vault is the source of truth.
-if command -v vault-engine >/dev/null 2>&1; then
-  ( vault-engine --vault "$VAULT_ROOT" reindex >/dev/null 2>&1 & ) || true
-fi
+DISPATCH_DIR="$VAULT_ROOT/.githooks/post-commit.d"
+
+# Empty-or-missing dispatch dir → no plug-ins → done.
+[ -d "$DISPATCH_DIR" ] || exit 0
+
+# Walk every executable file in lexical order. nullglob avoids the
+# literal-glob fallback when the directory is empty.
+shopt -s nullglob
+for hook in "$DISPATCH_DIR"/*; do
+  # Skip non-executable, non-files, and dotfiles.
+  case "$(basename "$hook")" in .*) continue ;; esac
+  [ -f "$hook" ] || continue
+  [ -x "$hook" ] || continue
+  # Run; failure is logged-only, not fatal.
+  "$hook"
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "post-commit: plug-in failed: $(basename "$hook") (exit $status)" >&2
+  fi
+done
+shopt -u nullglob
 
 exit 0
