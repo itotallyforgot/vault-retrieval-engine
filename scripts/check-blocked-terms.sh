@@ -23,17 +23,33 @@ BLOCKED_TERMS=(
   "Vistronix"
 )
 
-PERSONAL_PATTERNS_FILE="scripts/blocked-terms-personal.txt"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PERSONAL_PATTERNS_FILE="$SCRIPT_DIR/blocked-terms-personal.txt"
+SELF_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 
 found_match=0
+
+literal_term_pattern() {
+  local term="$1"
+  local escaped_term
+
+  escaped_term="$(printf '%s' "$term" | sed -e 's/[][(){}.^$*+?|\\/]/\\&/g')"
+  printf '(^|[^[:alnum:]_])%s([^[:alnum:]_]|$)' "$escaped_term"
+}
 
 for file in "$@"; do
   [ -f "$file" ] || continue
 
+  file_path="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
+  if [ "$file_path" = "$SELF_PATH" ]; then
+    continue
+  fi
+
   for term in "${BLOCKED_TERMS[@]}"; do
-    if grep -inF "$term" "$file" >/dev/null 2>&1; then
+    pattern="$(literal_term_pattern "$term")"
+    if grep -inE "$pattern" "$file" >/dev/null 2>&1; then
       echo "BLOCKED: '$term' found in $file"
-      grep -inF "$term" "$file" | head -3 | sed 's/^/  /'
+      grep -inE "$pattern" "$file" | head -3 | sed 's/^/  /'
       found_match=1
     fi
   done
