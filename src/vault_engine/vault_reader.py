@@ -142,7 +142,7 @@ def iter_pages(vault_path: Path) -> list[Page]:
     out: list[Page] = []
     seen_slugs: dict[str, Path] = {}
     for md_path in sorted(vault_path.rglob("*.md")):
-        parts = md_path.parts
+        parts = md_path.relative_to(vault_path).parts
         if any(p.startswith(".") for p in parts):
             continue
         if any(p in {"_ops", "_templates", "skills"} for p in parts):

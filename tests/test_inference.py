@@ -37,6 +37,7 @@ def test_page_vector_from_chunks_mean_pools_and_normalises():
     ]
     v = page_vector_from_chunks(chunks)
     # Mean would be [0.5, 0.5, 0, 0]; normalised → 1/sqrt(2) on each non-zero axis.
+    assert v is not None
     np.testing.assert_allclose(v, np.array([1, 1, 0, 0]) / np.sqrt(2), atol=1e-6)
 
 

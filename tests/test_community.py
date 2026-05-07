@@ -20,8 +20,12 @@ def test_communities_summary_groups_by_cid():
     G.add_edges_from([("a", "b"), ("b", "c"), ("c", "a"), ("x", "y"), ("y", "z"), ("z", "x")])
     summary = communities_summary(G)
     assert len(summary) == 2
-    sizes = sorted(c["size"] for c in summary.values())
-    assert sizes == [3, 3]
+    sizes: list[int] = []
+    for community in summary.values():
+        size = community["size"]
+        assert isinstance(size, int)
+        sizes.append(size)
+    assert sorted(sizes) == [3, 3]
 
 
 def test_compute_communities_empty_graph_safe():

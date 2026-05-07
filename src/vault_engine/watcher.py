@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from os import PathLike, fsdecode
 from pathlib import Path
 from threading import Lock
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.api import BaseObserver
 
 from vault_engine.config import EngineConfig
 
@@ -31,8 +33,8 @@ class _Handler(FileSystemEventHandler):
         self._last_seen: dict[Path, float] = {}
         self._lock = Lock()
 
-    def _is_relevant(self, src_path: str) -> Path | None:
-        path = Path(src_path).resolve()
+    def _is_relevant(self, src_path: str | bytes | PathLike[str] | PathLike[bytes]) -> Path | None:
+        path = Path(fsdecode(src_path)).resolve()
         if path.suffix.lower() != ".md":
             return None
         try:
@@ -44,7 +46,7 @@ class _Handler(FileSystemEventHandler):
             return None
         return path
 
-    def _maybe_emit(self, src_path: str) -> None:
+    def _maybe_emit(self, src_path: str | bytes | PathLike[str] | PathLike[bytes]) -> None:
         path = self._is_relevant(src_path)
         if path is None:
             return
@@ -87,7 +89,7 @@ class VaultWatcher:
         self.cfg = cfg
         self.on_change = on_change
         self.debounce = debounce_seconds
-        self._observer: Observer | None = None
+        self._observer: BaseObserver | None = None
 
     def start(self) -> None:
         handler = _Handler(self.cfg, self.on_change, self.debounce)
