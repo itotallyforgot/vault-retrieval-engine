@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INSTALLER="$ROOT_DIR/scripts/install-vault-overlays.sh"
 DISPATCHER="$ROOT_DIR/overlays/githooks/post-commit"
 ENGINE_PLUGIN="$ROOT_DIR/overlays/githooks/post-commit.d/10-vault-engine.sh"
+LEGACY_HOOK="$ROOT_DIR/tests/fixtures/legacy-monolithic-post-commit"
 
 tmpdir="$(mktemp -d)"
 cleanup() {
@@ -38,8 +39,7 @@ test -x "$absent_vault/.githooks/post-commit.d/10-vault-engine.sh"
 
 legacy_vault="$(make_vault legacy)"
 mkdir -p "$legacy_vault/.githooks"
-git -C "$ROOT_DIR" show origin/main:overlays/githooks/post-commit \
-  > "$legacy_vault/.githooks/post-commit"
+cp "$LEGACY_HOOK" "$legacy_vault/.githooks/post-commit"
 "$INSTALLER" --vault "$legacy_vault" >/dev/null
 assert_same "$DISPATCHER" "$legacy_vault/.githooks/post-commit"
 test -f "$legacy_vault/.githooks/post-commit.legacy.bak"
