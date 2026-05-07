@@ -5,6 +5,7 @@ from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.eval import EvalRunner, FixtureRow
 from vault_engine.indexer import Indexer
+from vault_engine.reranker import FusedHit
 from vault_engine.retrieval import Retrieval
 
 
@@ -79,5 +80,108 @@ def test_eval_runner_records_failure(sample_vault: Path, tmp_path: Path):
         report = runner.run(fixture_path)
         assert report.failed == 1
         assert "lookup-missing" in [f.id for f in report.failures]
+    finally:
+        idx.close()
+
+
+def test_eval_runner_fails_when_declared_mode_regresses(sample_vault: Path, tmp_path: Path):
+    cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        r = Retrieval(cfg=cfg, indexer=idx, embedder=idx.embedder)
+        fixture_path = tmp_path / "fix.jsonl"
+        fixture_path.write_text(
+            json.dumps(
+                {
+                    "id": "intent-regression",
+                    "query": "alpha",
+                    "expected_pages": ["alpha"],
+                    "min_citation_depth": 1,
+                    "mode": "semantic",
+                    "max_latency_ms": 5000,
+                }
+            )
+            + "\n"
+        )
+        runner = EvalRunner(cfg=cfg, retrieval=r)
+        report = runner.run(fixture_path)
+        assert report.failed == 1
+        assert report.failures[0].reason.startswith("wrong intent:")
+    finally:
+        idx.close()
+
+
+def test_eval_runner_fails_when_citation_depth_is_insufficient(sample_vault: Path, tmp_path: Path):
+    cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        r = Retrieval(cfg=cfg, indexer=idx, embedder=idx.embedder)
+        fixture_path = tmp_path / "fix.jsonl"
+        fixture_path.write_text(
+            json.dumps(
+                {
+                    "id": "citation-depth-regression",
+                    "query": "alpha",
+                    "expected_pages": ["alpha"],
+                    "min_citation_depth": 3,
+                    "mode": "lookup",
+                    "max_latency_ms": 5000,
+                }
+            )
+            + "\n"
+        )
+        runner = EvalRunner(cfg=cfg, retrieval=r)
+        report = runner.run(fixture_path)
+        assert report.failed == 1
+        assert report.failures[0].reason.startswith("insufficient citation depth:")
+    finally:
+        idx.close()
+
+
+def test_eval_runner_measures_citation_depth_on_expected_pages_only(
+    monkeypatch, sample_vault: Path, tmp_path: Path
+):
+    cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        r = Retrieval(cfg=cfg, indexer=idx, embedder=idx.embedder)
+        fixture_path = tmp_path / "fix.jsonl"
+        fixture_path.write_text(
+            json.dumps(
+                {
+                    "id": "orphan-citation-depth",
+                    "query": "orphan",
+                    "expected_pages": ["orphan"],
+                    "min_citation_depth": 1,
+                    "mode": "semantic",
+                    "max_latency_ms": 5000,
+                }
+            )
+            + "\n"
+        )
+        runner = EvalRunner(cfg=cfg, retrieval=r)
+        monkeypatch.setattr(
+            runner.router,
+            "dispatch",
+            lambda query, top_k: {
+                "intent": "semantic",
+                "fused_hits": [
+                    FusedHit(doc_id="orphan", rrf_score=1.0),
+                    FusedHit(doc_id="alpha", rrf_score=0.5),
+                ],
+            },
+        )
+        report = runner.run(fixture_path)
+        assert report.failed == 1
+        assert report.failures[0].reason.startswith("insufficient citation depth:")
     finally:
         idx.close()

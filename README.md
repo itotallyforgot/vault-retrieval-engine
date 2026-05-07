@@ -292,7 +292,7 @@ uv run vault-engine --vault tests/fixtures/sample_vault eval \
     --embedder mock
 ```
 
-Conventional Commits format. CI runs gitleaks + zizmor + ruff + pytest + eval-rig-mock on every push to `main` or `p1-engine-core`.
+Conventional Commits format. CI runs gitleaks + zizmor + ruff + pytest + pyright + eval-rig-mock on pull requests and configured push branches.
 
 ## Architecture decisions
 
@@ -304,6 +304,6 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 ## Status
 
-**v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 134 tests + 5 ADRs. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
+**v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 5 ADRs. Current local collection: 142 tests. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
 
-**Current line of work** (`p1-engine-core`): standalone-refactor extracting engine plumbing out of consumer vaults into overlays installed from this repo. Slice 1 (post-commit dispatcher pattern) shipped. v0.2.0 hardening (slug-schema migration, Service-CLI refactor, transport facade, observability polish) tracked at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N).
+**Current status**: post-v0.1.0 hardening is tracked at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N). Recent work has landed in `main`; see the `Unreleased` section of [`CHANGELOG.md`](./CHANGELOG.md) for shipped slices and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for deferred items.

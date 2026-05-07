@@ -68,12 +68,15 @@ def main(
         cache_dir=cache or EngineConfig(vault_path=vault).cache_dir,
     )
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    _state["cfg"] = cfg
+    if ctx.invoked_subcommand == "eval":
+        return
+
     embedder: Embedder
     if mock_embedder:
         embedder = MockEmbedder(dim=cfg.embedding_dim)
     else:
         embedder = SentenceTransformerEmbedder(cfg.embedding_model)
-    _state["cfg"] = cfg
     _state["embedder"] = embedder
 
 
@@ -199,7 +202,7 @@ def eval_cmd(
     if embedder == "mock":
         active_embedder = MockEmbedder(dim=cfg.embedding_dim)
     else:
-        active_embedder = _state["embedder"]  # type: ignore[assignment]
+        active_embedder = SentenceTransformerEmbedder(cfg.embedding_model)
 
     idx = Indexer(cfg=cfg, embedder=active_embedder)
     idx.open()

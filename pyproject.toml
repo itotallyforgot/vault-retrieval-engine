@@ -30,6 +30,7 @@ vault-engine = "vault_engine.cli:app"
 dev = [
     "pytest>=8.3",
     "pytest-cov>=6.0",
+    "pyright>=1.1.400",
     "ruff>=0.7",
 ]
 

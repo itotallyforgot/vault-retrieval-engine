@@ -1,10 +1,12 @@
 import time
 from pathlib import Path
 
+from watchdog.events import FileModifiedEvent
+
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer
-from vault_engine.watcher import VaultWatcher
+from vault_engine.watcher import VaultWatcher, _Handler
 
 
 def test_watcher_routes_md_change_to_indexer(sample_vault: Path, tmp_path: Path):
@@ -35,13 +37,20 @@ def test_watcher_routes_md_change_to_indexer(sample_vault: Path, tmp_path: Path)
 
 def test_watcher_ignores_non_markdown(sample_vault: Path, tmp_path: Path):
     cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
-    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
     events: list[Path] = []
-    watcher = VaultWatcher(cfg=cfg, on_change=lambda p: events.append(p))
-    watcher.start()
-    try:
-        (sample_vault / "raw" / "binary.bin").write_bytes(b"\x00\x01")
-        time.sleep(1.0)
-    finally:
-        watcher.stop()
+    handler = _Handler(cfg=cfg, on_change=events.append, debounce_seconds=0.0)
+
+    handler.on_modified(FileModifiedEvent(str(sample_vault / "raw" / "binary.bin")))
+
     assert not events
+
+
+def test_watcher_decodes_bytes_event_paths(sample_vault: Path, tmp_path: Path):
+    cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
+    events: list[Path] = []
+    handler = _Handler(cfg=cfg, on_change=events.append, debounce_seconds=0.0)
+    path = sample_vault / "wiki" / "topics" / "alpha.md"
+
+    handler.on_modified(FileModifiedEvent(bytes(path)))
+
+    assert events == [path.resolve()]
