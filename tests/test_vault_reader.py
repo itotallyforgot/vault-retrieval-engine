@@ -67,3 +67,49 @@ def test_build_alias_map_maps_titles_aliases_slugs(sample_vault):
     assert alias_map["alpha"].slug == "alpha"
     assert alias_map["alpha-thing"].slug == "alpha"
     assert alias_map["beta"].slug == "beta"
+
+
+def test_iter_pages_excludes_external_skills(tmp_path: Path):
+    """external-skills/ houses agent-tooling bundles, not user content."""
+    (tmp_path / "wiki" / "topics").mkdir(parents=True)
+    (tmp_path / "external-skills" / "some-bundle" / "skills").mkdir(parents=True)
+
+    (tmp_path / "wiki" / "topics" / "real-page.md").write_text("---\ntitle: Real\n---\nbody")
+    # external-skills bundle drops .md files (incl. SKILL.md collisions
+    # across nested subdirs); none should be walked.
+    (tmp_path / "external-skills" / "some-bundle" / "SKILL.md").write_text(
+        "---\ntitle: Bundle Wrapper\n---\nbody"
+    )
+    (tmp_path / "external-skills" / "some-bundle" / "skills" / "SKILL.md").write_text(
+        "---\ntitle: Sub-skill\n---\nbody"
+    )
+
+    pages = iter_pages(tmp_path)
+    slugs = [p.slug for p in pages]
+    assert slugs == ["real-page"]
+
+
+def test_iter_pages_skips_slug_collision_with_warning(tmp_path: Path, caplog):
+    """Stem-only slugs collide across dirs (raw/foo + wiki/sources/foo).
+    Engine should index the first and skip the second with a warning, not
+    abort the whole index.
+    """
+    import logging
+
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "wiki" / "sources").mkdir(parents=True)
+    (tmp_path / "wiki" / "topics").mkdir()
+
+    (tmp_path / "raw" / "shared.md").write_text("---\ntitle: A\n---\nraw body")
+    (tmp_path / "wiki" / "sources" / "shared.md").write_text("---\ntitle: B\n---\nwiki body")
+    (tmp_path / "wiki" / "topics" / "unique.md").write_text("---\ntitle: U\n---\nunique body")
+
+    with caplog.at_level(logging.WARNING, logger="vault_engine.vault_reader"):
+        pages = iter_pages(tmp_path)
+
+    slugs = sorted(p.slug for p in pages)
+    # Both unique pages indexed; collision pair contributes exactly one.
+    assert slugs == ["shared", "unique"]
+    assert any("slug collision skipped" in r.getMessage() for r in caplog.records), (
+        "expected a 'slug collision skipped' warning"
+    )

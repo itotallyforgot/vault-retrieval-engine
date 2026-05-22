@@ -1,12 +1,15 @@
 """Read pages out of the vault. Parses frontmatter, body, classifies kind."""
 
 import datetime
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import frontmatter
+
+log = logging.getLogger(__name__)
 
 # Hard cap on individual page size to bound memory + embedder cost. Pages
 # larger than this are skipped at iter_pages time with a warning, NOT
@@ -131,12 +134,17 @@ def iter_pages(vault_path: Path) -> list[Page]:
     """Walk the vault for markdown pages and read each.
 
     Includes wiki/topics/, wiki/sources/, raw/. Skips _ops/, _templates/,
-    skills/, and dotfile directories. Populates Page.wikilinks for every
-    page. Skips symlinks pointing outside the vault root.
+    skills/, external-skills/, and dotfile directories. Populates
+    Page.wikilinks for every page. Skips symlinks pointing outside the
+    vault root.
 
-    Raises:
-        SlugCollisionError: two pages in the vault share the same stem
-            (which would silently clobber each other in the vec store).
+    Slug collisions: stem-only slugs can collide across directories
+    (e.g. ``README.md`` at vault root + ``wiki/insights/README.md``, or a
+    ``raw/<source>.md`` and its corresponding ``wiki/sources/<source>.md``).
+    The first occurrence wins; subsequent files with the same stem are
+    skipped with a logger warning, so a single colliding pair doesn't
+    abort the entire index. v0.2.0's slug-schema migration will
+    path-disambiguate properly.
     """
     vault_root = vault_path.resolve()
     out: list[Page] = []
@@ -145,7 +153,7 @@ def iter_pages(vault_path: Path) -> list[Page]:
         parts = md_path.parts
         if any(p.startswith(".") for p in parts):
             continue
-        if any(p in {"_ops", "_templates", "skills"} for p in parts):
+        if any(p in {"_ops", "_templates", "skills", "external-skills"} for p in parts):
             continue
         # Skip symlinks that escape the vault root (e.g. pointing at /etc/passwd).
         try:
@@ -160,11 +168,17 @@ def iter_pages(vault_path: Path) -> list[Page]:
             # at the indexer layer rather than aborting iter_pages.
             continue
         if page.slug in seen_slugs:
+            # Skip-with-warning rather than raise — see docstring. v0.2.0
+            # slug-schema migration is the proper fix.
             other = seen_slugs[page.slug]
-            raise SlugCollisionError(
-                f"slug collision: {md_path} and {other} share stem "
-                f"{page.slug!r}; rename one to disambiguate."
+            log.warning(
+                "slug collision skipped: %s already indexed as %s; ignoring %s. "
+                "Rename to disambiguate, or wait for v0.2.0 slug-schema migration.",
+                page.slug,
+                other,
+                md_path,
             )
+            continue
         seen_slugs[page.slug] = md_path
         page.wikilinks = parse_wikilinks(page.body)
         out.append(page)
