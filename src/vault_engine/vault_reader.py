@@ -81,7 +81,7 @@ def read_page(path: Path) -> Page:
     text = path.read_text(encoding="utf-8", errors="replace")
     fm = frontmatter.loads(text)
     fm_dict: dict[str, Any] = {
-        k: v.isoformat() if isinstance(v, (datetime.date, datetime.datetime)) else v
+        k: v.isoformat() if isinstance(v, datetime.date | datetime.datetime) else v
         for k, v in (fm.metadata or {}).items()
     }
     title = str(fm_dict.get("title") or slug_for_path(path))
