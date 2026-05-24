@@ -40,6 +40,20 @@
     Full path to `nssm.exe`. Auto-detected if omitted (PATH first, then
     `%LOCALAPPDATA%\Microsoft\WinGet\Packages\NSSM.NSSM_*\nssm-*\win64\`).
 
+.PARAMETER BindAddr
+    HTTP bind interface. Wired into the service via NSSM
+    `AppEnvironmentExtra` as `VAULT_ENGINE_BIND_ADDR`, mirroring the
+    macOS launchd plist (OGR-181). Defaults to `127.0.0.1` (loopback).
+    Pass the Tailscale IP to expose over the tailnet.
+
+.PARAMETER HttpPort
+    HTTP listen port. Wired as `VAULT_ENGINE_HTTP_PORT`. Default 7842.
+
+.PARAMETER HttpToken
+    Bearer secret for `Authorization: Bearer <token>` on `/query` and
+    `/graph/stats`. Wired as `VAULT_ENGINE_HTTP_TOKEN`. Required if
+    `-BindAddr` is non-loopback — the engine refuses to bind without it.
+
 .PARAMETER Start
     Start the service immediately after installation. Default: $true.
 
@@ -75,6 +89,12 @@ param(
     [string]$VaultEngineExe,
 
     [string]$Nssm,
+
+    [string]$BindAddr = '127.0.0.1',
+
+    [int]$HttpPort = 7842,
+
+    [string]$HttpToken,
 
     [bool]$Start = $true,
 
@@ -123,6 +143,20 @@ if (-not $DryRun) {
     New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 }
 
+# Match the macOS install script: refuse non-loopback bind without a
+# token. Engine's http_server.build_app enforces this too, but surfacing
+# it at install time saves the operator a stderr-log read.
+#
+# Note: -HttpToken is the HS256 SIGNING SECRET, not a pre-shared bearer.
+# Clients send JWTs signed with this secret. See README and docs/ios-shortcut.md.
+$loopback = @('127.0.0.1', '::1', 'localhost')
+if (($loopback -notcontains $BindAddr) -and (-not $HttpToken)) {
+    throw "BindAddr '$BindAddr' is non-loopback; -HttpToken (HS256 signing secret) is required to prevent unauthenticated remote access. Generate one: uv run python -c `"import secrets; print(secrets.token_urlsafe(32))`""
+}
+if ($HttpPort -lt 1 -or $HttpPort -gt 65535) {
+    throw "HttpPort must be 1-65535 (got $HttpPort)."
+}
+
 # --- Elevation check ----------------------------------------------------
 $isAdmin = ([Security.Principal.WindowsPrincipal] `
     [Security.Principal.WindowsIdentity]::GetCurrent() `
@@ -152,6 +186,22 @@ if ($CacheDir) {
 $StdoutLog = Join-Path $LogDir "$ServiceName-stdout.log"
 $StderrLog = Join-Path $LogDir "$ServiceName-stderr.log"
 
+# AppEnvironmentExtra: NSSM accepts a single string of KEY=VALUE pairs
+# separated by CR-LF (or just LF). The engine reads these via
+# vault_engine.config.load_config — same precedence as the macOS
+# LaunchAgent (env-var > function-arg > dataclass-default). The cache
+# dir is intentionally left to the EngineConfig default unless the
+# operator passed -CacheDir, in which case it's already wired via the
+# CLI flag and we don't want env to override the explicit arg.
+$envLines = @(
+    "VAULT_ENGINE_BIND_ADDR=$BindAddr"
+    "VAULT_ENGINE_HTTP_PORT=$HttpPort"
+)
+if ($HttpToken) {
+    $envLines += "VAULT_ENGINE_HTTP_TOKEN=$HttpToken"
+}
+$AppEnvironmentExtra = $envLines -join "`r`n"
+
 # Run-list: each item is a label + the nssm argv after "nssm". We collect
 # them all up front so -DryRun can print the full plan before any state
 # changes, and so a failure mid-install names the exact step that broke.
@@ -159,6 +209,7 @@ $Steps = @(
     @{ Label = "install service '$ServiceName'";   Args = @('install', $ServiceName, $VaultEngineExe) },
     @{ Label = "set AppParameters";                 Args = @('set', $ServiceName, 'AppParameters', $AppParameters) },
     @{ Label = "set AppDirectory";                  Args = @('set', $ServiceName, 'AppDirectory', $VaultPath) },
+    @{ Label = "set AppEnvironmentExtra";           Args = @('set', $ServiceName, 'AppEnvironmentExtra', $AppEnvironmentExtra) },
     @{ Label = "set Start to AUTO";                 Args = @('set', $ServiceName, 'Start', 'SERVICE_AUTO_START') },
     @{ Label = "set Description";                   Args = @('set', $ServiceName, 'Description', 'Vault retrieval engine HTTP/MCP service (P2 service wrapper).') },
     @{ Label = "set DisplayName";                   Args = @('set', $ServiceName, 'DisplayName', 'Vault Retrieval Engine') },
@@ -173,6 +224,7 @@ $Steps = @(
     @{ Label = "set AppThrottle=10s";               Args = @('set', $ServiceName, 'AppThrottle', '10000') }
 )
 
+$tokenSummary = if ($HttpToken) { "<set, $($HttpToken.Length) chars>" } else { "<unset; loopback-only>" }
 Write-Host "Plan:"
 Write-Host "  service:   $ServiceName"
 Write-Host "  exe:       $VaultEngineExe"
@@ -180,6 +232,9 @@ Write-Host "  arguments: $AppParameters"
 Write-Host "  cwd:       $VaultPath"
 Write-Host "  logs:      $LogDir"
 Write-Host "  nssm:      $Nssm"
+Write-Host "  env vars:  VAULT_ENGINE_BIND_ADDR=$BindAddr"
+Write-Host "             VAULT_ENGINE_HTTP_PORT=$HttpPort"
+Write-Host "             VAULT_ENGINE_HTTP_TOKEN=$tokenSummary"
 Write-Host ''
 
 foreach ($step in $Steps) {
