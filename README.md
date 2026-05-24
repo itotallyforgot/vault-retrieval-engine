@@ -134,7 +134,17 @@ Tool surface:
 uv run vault-engine serve --vault ~/Projects/markdown-vault
 ```
 
-Bind to the tailnet IP and require a token via `EngineConfig` (`http_bind_addr`, `http_port`, `http_token`) or env vars.
+Bind to the tailnet IP and require a token via `EngineConfig` (`http_bind_addr`, `http_port`, `http_token`) or env vars (`VAULT_ENGINE_BIND_ADDR`, `VAULT_ENGINE_HTTP_PORT`, `VAULT_ENGINE_HTTP_TOKEN`, `VAULT_ENGINE_CACHE_DIR`). Env-var precedence is `env-var > function-arg > dataclass-default`; the launchd plist and NSSM service both rely on this so the install scripts can fully configure the engine without a TOML file.
+
+For long-lived service mode see `docs/windows-service.md` (PC, NSSM) and the new macOS path:
+
+```bash
+./scripts/install-launchd-service.sh --vault ~/Projects/markdown-vault \
+    --bind <tailnet-ip-or-127.0.0.1> --token <bearer-secret>
+```
+
+Phone-side: `docs/ios-shortcut.md` walks through an iOS Shortcut that
+hits `POST /query` over Tailscale (Authorization: Bearer).
 
 `/health` (no auth) returns `{"status":"ok","running":bool}`.
 
@@ -167,15 +177,15 @@ Engine config is layered (later wins):
 
 Common knobs:
 
-| Setting | Default | Notes |
-|---|---|---|
-| `vault_path` | `--vault` flag required | The directory containing `wiki/` and `raw/` |
-| `cache_dir` | `~/.cache/vault-engine` | Embedding cache, vec DB, graph pickle |
-| `embedding_model` | `mxbai-embed-large-v1` | Or `nomic-embed-text-v1.5`, `all-MiniLM-L6-v2` |
-| `inferred_threshold` | `0.85` | Cosine threshold for INFERRED graph edges |
-| `http_bind_addr` | `127.0.0.1` | HTTP server bind interface (private by default) |
-| `http_port` | `7842` | HTTP server port |
-| `http_token` | — | JWT secret for HTTP auth |
+| Setting | Default | Env var | Notes |
+|---|---|---|---|
+| `vault_path` | `--vault` flag required | — | The directory containing `wiki/` and `raw/` |
+| `cache_dir` | `~/.cache/vault-engine` | `VAULT_ENGINE_CACHE_DIR` | Embedding cache, vec DB, graph pickle |
+| `embedding_model` | `mxbai-embed-large-v1` | — | Or `nomic-embed-text-v1.5`, `all-MiniLM-L6-v2` |
+| `inferred_threshold` | `0.85` | — | Cosine threshold for INFERRED graph edges |
+| `http_bind_addr` | `127.0.0.1` | `VAULT_ENGINE_BIND_ADDR` | HTTP server bind interface (private by default) |
+| `http_port` | `7842` | `VAULT_ENGINE_HTTP_PORT` | HTTP server port |
+| `http_token` | — | `VAULT_ENGINE_HTTP_TOKEN` | Bearer secret for HTTP auth (HS256 JWT or pre-shared) |
 
 ## Eval methodology
 
@@ -216,7 +226,8 @@ If the engine is uninstalled, crashed, or unreachable, no vault content is lost.
 The markdown-vault template runs standalone. Integrations between vault and engine are designed as overlays installed from this repo, not as plumbing inside the vault:
 
 - **`vault-engine hook install --vault <path>`** — installs Claude Code Glob/Grep hint that prefers `/vault query` (idempotent, per-OS).
-- **`scripts/install-windows-service.ps1`** — registers an NSSM service for engine HTTP/MCP on PC.
+- **`scripts/install-windows-service.ps1`** — registers an NSSM service for engine HTTP/MCP on PC. Wires `VAULT_ENGINE_BIND_ADDR`, `VAULT_ENGINE_HTTP_PORT`, and `VAULT_ENGINE_HTTP_TOKEN` into the service environment via NSSM's `AppEnvironmentExtra`.
+- **`scripts/install-launchd-service.sh`** — registers a macOS LaunchAgent for the same engine HTTP/MCP surface. Mirrors the NSSM env-var conventions so the same token/bind/port wiring works across machines. See `overlays/launchd/com.vault-retrieval.engine.plist` for the template and `docs/ios-shortcut.md` for the phone-to-engine path over Tailscale.
 - **`scripts/install-vault-overlays.sh`** — drops engine-aware vault overlays into a target vault:
   - `skills/vault/synth.md` — engine-aware insight-discovery skill (uses MCP `query_graph`).
   - `skills/vault/crawl.md` — engine-aware URL → `raw/` scrape skill (wraps `vault-engine add`).

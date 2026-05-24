@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd LaunchAgent template for vault-retrieval-engine (ISSUE-N).
+
+  Counterpart to scripts/install-windows-service.ps1 (NSSM). The install
+  script (scripts/install-launchd-service.sh) substitutes the __PLACEHOLDER__
+  tokens below and copies the result to ~/Library/LaunchAgents/, then
+  bootstraps it via `launchctl bootstrap gui/<uid>`.
+
+  Why a LaunchAgent (gui domain) instead of a LaunchDaemon:
+    - Runs as the logged-in user, so it shares your Hugging Face cache,
+      vault permissions, and Tailscale auth context.
+    - Survives logout iff loaded into gui/<uid>; that matches the NSSM
+      LocalSystem behavior on PC closely enough for personal use.
+    - No root required to install. LaunchDaemons need root + SIP-aware
+      placement under /Library/LaunchDaemons/.
+
+  Why ProgramArguments (array) instead of Program + AppParameters:
+    - launchd does NOT shell-evaluate ProgramArguments. Each element is
+      passed as a separate argv slot, so spaces in $VAULT_PATH cannot
+      shell-inject. Matches NSSM's argv handling.
+
+  EnvironmentVariables: the install script wires VAULT_ENGINE_BIND_ADDR,
+  VAULT_ENGINE_HTTP_PORT, and VAULT_ENGINE_HTTP_TOKEN here. The engine
+  reads them via vault_engine.config.load_config (precedence:
+  env-var > function-arg > dataclass-default).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.vault-retrieval.engine</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__UV_BIN__</string>
+        <string>run</string>
+        <string>--directory</string>
+        <string>__REPO_DIR__</string>
+        <string>vault-engine</string>
+        <string>serve</string>
+        <string>--vault</string>
+        <string>__VAULT_PATH__</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>VAULT_ENGINE_BIND_ADDR</key>
+        <string>__BIND_ADDR__</string>
+        <key>VAULT_ENGINE_HTTP_PORT</key>
+        <string>__HTTP_PORT__</string>
+        <key>VAULT_ENGINE_HTTP_TOKEN</key>
+        <string>__HTTP_TOKEN__</string>
+        <key>VAULT_ENGINE_CACHE_DIR</key>
+        <string>__CACHE_DIR__</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_DIR__/vault-engine-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__LOG_DIR__/vault-engine-stderr.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
