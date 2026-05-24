@@ -139,6 +139,6 @@ def test_query_with_auth_rejects_empty_bearer_token(app_with_auth):
     """Edge case: Bearer with empty/whitespace token."""
     client = TestClient(app_with_auth)
     r = client.post("/query", json={"q": "test"}, headers={"Authorization": "Bearer "})
-    assert r.status_code == 401, (
-        f"Expected 401 for empty bearer token, got {r.status_code}: {r.json()}"
-    )
+    assert (
+        r.status_code == 401
+    ), f"Expected 401 for empty bearer token, got {r.status_code}: {r.json()}"
