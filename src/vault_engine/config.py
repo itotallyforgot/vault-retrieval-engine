@@ -89,6 +89,14 @@ class EngineConfig:
     mcp_enabled: bool = False
     service_pidfile: Path | None = None
 
+    # Prototype flag (default OFF). Gates the decision-trace retrieval path: a
+    # DECISION_TRACE node/edge type on the graph layer plus a structural hop that
+    # walks reasoning edges to answer "why was X concluded?" rather than fetching
+    # semantic neighbors. See [[2026-06-06-decision-traces-context-graphs-neo4j]].
+    # OFF means construction and retrieval are byte-identical to pre-prototype
+    # behavior; the node/edge type are inert metadata until a caller opts in.
+    decision_trace_enabled: bool = False
+
     def __post_init__(self) -> None:
         self.vault_path = Path(self.vault_path).expanduser().resolve()
         if not self.vault_path.exists():
