@@ -61,6 +61,26 @@ jobs:
       - name: pytest
         run: uv run pytest -q --tb=short
 
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Run shell smoke harnesses
+        run: |
+          for harness in \
+            tests/smoke_check_blocked_terms.sh \
+            tests/smoke_install_vault_overlays_dispatcher.sh \
+            tests/smoke_post_commit_dispatcher.sh; do
+            echo "::group::$harness"
+            bash "$harness"
+            echo "::endgroup::"
+          done
+
   ruff:
     runs-on: ubuntu-latest
     steps:

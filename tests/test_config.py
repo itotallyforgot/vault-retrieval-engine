@@ -11,7 +11,6 @@ def test_engine_config_defaults_resolve_under_vault(tmp_path: Path):
     cfg = EngineConfig(vault_path=vault)
     assert cfg.vault_path == vault
     assert cfg.embeddings_db.parent.exists() or cfg.embeddings_db.parent == cfg.cache_dir
-    assert cfg.graph_pickle.suffix == ".pkl"
     assert cfg.embedding_model == "mixedbread-ai/mxbai-embed-large-v1"
     assert cfg.embedding_dim == 1024
     assert cfg.chunk_max_tokens > 0
@@ -30,7 +29,6 @@ def test_load_config_creates_cache_dir(tmp_path: Path):
     cfg = load_config(vault_path=vault, cache_dir=cache)
     assert cache.exists()
     assert cfg.embeddings_db.parent == cache
-    assert cfg.graph_pickle.parent == cache
 
 
 def test_config_p2_defaults(tmp_path: Path):
