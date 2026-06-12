@@ -1,15 +1,25 @@
 """Semantic-similarity edge inference (P3 #6).
 
-Adds INFERRED edges to the graph for page pairs whose mean-pooled chunk
+Adds inferred edges to the graph for page pairs whose mean-pooled chunk
 vectors meet or exceed a cosine-similarity threshold. EXTRACTED wikilink
 edges are never overwritten — the inference layer is strictly additive.
 
 Edges are emitted symmetrically (a → b and b → a) so graph walks surface
 the relationship from either direction. Each edge carries
-``relation="similarity"``, ``edge_type="INFERRED"``, and
-``confidence = similarity`` so downstream consumers (citation chains, the
-MCP ``graph_stats`` tool) can distinguish them from wikilink edges and rank
-by strength.
+``relation="similarity"``, ``confidence = similarity``, and an ``edge_type``
+that splits the inferred band by strength:
+
+- ``INFERRED``  — confidence >= ``AMBIGUOUS_CEILING`` (0.95): a confident
+  semantic link.
+- ``AMBIGUOUS`` — ``threshold`` <= confidence < 0.95: real signal but in the
+  band where the bag-of-words embedder also scores near-duplicate or
+  word-swapped pages highly (see KNOWN_ISSUES), so the relation's polarity /
+  direction is not trustworthy. Downstream consumers can down-weight or hide
+  these without losing the high-confidence ``INFERRED`` edges.
+
+Downstream consumers (citation chains, the MCP ``graph_stats`` tool) use
+``edge_type`` to distinguish all three from wikilink edges and rank by
+strength.
 
 Performance: similarity computation uses a single ``M @ M.T`` matmul over
 all page vectors instead of an O(N^2) Python loop of per-pair cosines.
@@ -20,6 +30,20 @@ import numpy as np
 
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecStore
+
+# Similarity at/above this is treated as a confident INFERRED edge. Pairs in
+# the [threshold, AMBIGUOUS_CEILING) band are real signal but weak enough to be
+# noise (on mxbai, near-duplicate / word-swapped pages cluster here — see
+# KNOWN_ISSUES, the bag-of-words weakness), so they are annotated AMBIGUOUS
+# instead of INFERRED. Downstream consumers can down-weight or hide AMBIGUOUS
+# edges without dropping the high-confidence ones.
+AMBIGUOUS_CEILING = 0.95
+
+
+def _edge_type_for_similarity(sim: float) -> str:
+    """INFERRED for sim >= AMBIGUOUS_CEILING, else AMBIGUOUS (caller has already
+    confirmed sim >= threshold)."""
+    return "INFERRED" if sim >= AMBIGUOUS_CEILING else "AMBIGUOUS"
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -132,16 +156,17 @@ def add_similarity_edges(
             if sim < threshold:
                 continue
             src, dst = slugs[i], slugs[j]
+            edge_type = _edge_type_for_similarity(sim)
             for a, b in ((src, dst), (dst, src)):
                 if graph.graph.has_edge(a, b):
-                    # EXTRACTED takes precedence; existing INFERRED edge is
-                    # left alone for stability across reruns.
+                    # EXTRACTED takes precedence; existing INFERRED/AMBIGUOUS
+                    # edge is left alone for stability across reruns.
                     continue
                 graph.add_edge(
                     a,
                     b,
                     relation="similarity",
-                    edge_type="INFERRED",
+                    edge_type=edge_type,
                     confidence=sim,
                 )
                 added += 1
