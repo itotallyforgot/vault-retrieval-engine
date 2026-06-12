@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from vault_engine.chunker import chunk_page
@@ -11,7 +12,9 @@ from vault_engine.embedder import Embedder
 from vault_engine.inference import add_similarity_edges
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecStore
-from vault_engine.vault_reader import iter_pages, parse_wikilinks, read_page
+from vault_engine.vault_reader import SkippedPage, iter_pages, parse_wikilinks, read_page
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -21,6 +24,11 @@ class IndexReport:
     chunks_changed: int = 0
     chunks_unchanged: int = 0
     pages_deleted: int = 0
+    # Pages a vault walk could not read (oversize / unreadable) and dropped
+    # from the index. Surfaced loudly instead of silently swallowed (E4): the
+    # paths feed a per-skip warning log, and ``pages_skipped`` is the count.
+    pages_skipped: int = 0
+    skipped: list[SkippedPage] = field(default_factory=list)
 
 
 class Indexer:
@@ -85,6 +93,21 @@ class Indexer:
         report.chunks_unchanged += len(chunks) - len(changed_chunks)
         report.chunks_indexed += len(chunks)
 
+    def _walk_pages(self, report: IndexReport) -> list:
+        """Walk the vault, recording + logging any pages skipped as unreadable.
+
+        Centralises the ``iter_pages`` call so every reindex path (full or
+        per-page) surfaces oversize/unreadable skips the same way: a warning
+        per skip plus the running count on the report (E4).
+        """
+        skipped: list[SkippedPage] = []
+        pages = iter_pages(self.cfg.vault_path, skipped=skipped)
+        for s in skipped:
+            log.warning("Skipped unreadable page during index walk: %s (%s)", s.path, s.reason)
+        report.skipped.extend(skipped)
+        report.pages_skipped += len(skipped)
+        return pages
+
     def rebuild(self) -> IndexReport:
         """Re-read every page and re-index from scratch.
 
@@ -93,7 +116,7 @@ class Indexer:
         Graph: full rebuild — cheap at vault scale.
         """
         report = IndexReport()
-        pages = iter_pages(self.cfg.vault_path)
+        pages = self._walk_pages(report)
         for page in pages:
             chunks = chunk_page(page.slug, page.body)
             if chunks:
@@ -129,20 +152,30 @@ class Indexer:
             self.vec.delete_page(slug)
             report.pages_deleted = 1
         else:
-            page = read_page(path)
-            page.wikilinks = parse_wikilinks(page.body)
-            chunks = chunk_page(page.slug, page.body)
-            if chunks:
-                self._index_page_chunks(page.slug, chunks, report)
-            else:
-                # Empty page (no chunks): drop everything for this slug.
-                self.vec.delete_page(page.slug)
-            report.pages_processed = 1
+            try:
+                page = read_page(path)
+            except ValueError:
+                # The changed file is itself oversize/unreadable. Drop any
+                # stale chunks for its slug here; the skip is logged + counted
+                # by the _walk_pages call below (the single source of truth for
+                # skip accounting, so this oversize file isn't double-reported).
+                self.vec.delete_page(path.stem)
+                page = None
+            if page is not None:
+                page.wikilinks = parse_wikilinks(page.body)
+                chunks = chunk_page(page.slug, page.body)
+                if chunks:
+                    self._index_page_chunks(page.slug, chunks, report)
+                else:
+                    # Empty page (no chunks): drop everything for this slug.
+                    self.vec.delete_page(page.slug)
+                report.pages_processed = 1
 
         # Single disk walk for the graph rebuild. iter_pages is the only
         # way the engine knows which pages exist post-rename / post-delete,
-        # so this stays even for the deleted-file branch.
-        pages = iter_pages(self.cfg.vault_path)
+        # so this stays even for the deleted-file branch. Skips here are
+        # logged + counted via _walk_pages.
+        pages = self._walk_pages(report)
         self.graph.rebuild(pages)
         add_similarity_edges(
             self.graph,

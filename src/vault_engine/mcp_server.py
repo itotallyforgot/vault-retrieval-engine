@@ -325,9 +325,12 @@ def build_server(svc: Service) -> _ServerHandle:
             return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
         try:
             # Hold the (reentrant) service lock so concurrent watcher
-            # reindexes can't mutate the graph mid-iteration. Handlers that
-            # internally call svc.query() re-enter the lock safely.
-            with svc._lock:
+            # reindexes can't mutate the graph mid-iteration. Handlers walk
+            # svc.graph across many statements, so the lock must span the
+            # whole handler, not just per-accessor. graph_lock() is the
+            # public surface for this; handlers that internally call
+            # svc.query() re-enter the same RLock safely.
+            with svc.graph_lock():
                 text = handler(arguments)
             return [types.TextContent(type="text", text=text)]
         except Exception as exc:

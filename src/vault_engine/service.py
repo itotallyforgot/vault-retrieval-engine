@@ -122,7 +122,36 @@ class Service:
     # used patterns through a typed surface. Full GraphQuery facade with
     # all 10+ MCP tool primitives is on the v0.2.0 roadmap; the current
     # surface covers the highest-traffic call sites.
+    #
+    # Concurrency: the watcher thread mutates the graph (via
+    # ``reindex_page`` -> ``graph.rebuild``) under ``self._lock``. Reads here
+    # must take the SAME lock or they can observe a half-rebuilt graph
+    # (``graph.rebuild`` reassigns ``self.graph`` and re-adds nodes/edges).
+    # ``_lock`` is an ``RLock``, so a caller already holding it (e.g. the MCP
+    # handler) can call these without deadlocking. The ``graph`` property
+    # returns the live DiGraph for callers that iterate it themselves; those
+    # callers are responsible for holding ``svc._lock`` across the iteration
+    # (the MCP server does this), which is why mutation here is serialized
+    # through the same lock.
     # ------------------------------------------------------------------
+
+    def graph_lock(self):
+        """Public re-entrant lock guarding graph reads/mutations.
+
+        Transports that iterate the live graph across several statements
+        (e.g. the MCP handlers walking ``svc.graph.nodes``) hold this for the
+        whole critical section so a concurrent watcher reindex can't mutate
+        the graph mid-iteration. Returns the service's ``RLock`` so callers
+        don't have to reach into the private ``_lock`` attribute::
+
+            with svc.graph_lock():
+                for nid, data in svc.graph.nodes(data=True):
+                    ...
+
+        Re-entrant: nesting this with the typed accessors below (which also
+        take the lock) does not deadlock.
+        """
+        return self._lock
 
     @property
     def graph(self):
@@ -130,30 +159,37 @@ class Service:
         below where they cover the use case; this property exists so
         transports don't have to traverse ``.graph_store.graph`` and so
         a future GraphQuery facade has a single rename target.
+
+        Callers that iterate the returned graph must hold ``graph_lock()``
+        for the duration, otherwise a concurrent watcher reindex can mutate
+        it mid-iteration. The typed accessors below do this internally.
         """
-        return self.graph_store.graph
+        with self._lock:
+            return self.graph_store.graph
 
     def graph_node(self, slug: str) -> dict | None:
         """Return the node attribute dict for ``slug``, or None if absent."""
-        g = self.graph_store.graph
-        if not g.has_node(slug):
-            return None
-        return dict(g.nodes[slug])
+        with self._lock:
+            g = self.graph_store.graph
+            if not g.has_node(slug):
+                return None
+            return dict(g.nodes[slug])
 
     def graph_stats(self) -> dict:
         """Return summary stats: node count, edge count, communities, edge-type counts."""
-        g = self.graph_store.graph
-        type_counts: dict[str, int] = {}
-        for _, _, d in g.edges(data=True):
-            t = d.get("edge_type", "EXTRACTED")
-            type_counts[t] = type_counts.get(t, 0) + 1
-        communities = {d.get("community") for _, d in g.nodes(data=True) if "community" in d}
-        return {
-            "nodes": g.number_of_nodes(),
-            "edges": g.number_of_edges(),
-            "communities": len(communities),
-            "edge_types": type_counts,
-        }
+        with self._lock:
+            g = self.graph_store.graph
+            type_counts: dict[str, int] = {}
+            for _, _, d in g.edges(data=True):
+                t = d.get("edge_type", "EXTRACTED")
+                type_counts[t] = type_counts.get(t, 0) + 1
+            communities = {d.get("community") for _, d in g.nodes(data=True) if "community" in d}
+            return {
+                "nodes": g.number_of_nodes(),
+                "edges": g.number_of_edges(),
+                "communities": len(communities),
+                "edge_types": type_counts,
+            }
 
     # ------------------------------------------------------------------
     # Internal callbacks

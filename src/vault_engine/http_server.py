@@ -102,8 +102,15 @@ def build_app(svc: Service, *, secret: str | None, bind_addr: str | None = None)
     def health() -> dict:
         return {"status": "ok", "running": svc.is_running()}
 
+    # NOTE: ``query`` and ``graph_stats`` are intentionally plain ``def``, not
+    # ``async def``. ``svc.query()`` / ``svc.graph_stats()`` are synchronous and
+    # can run for seconds (a reindex or CPU-bound encode holds the service
+    # lock). Declared sync, FastAPI runs them in its threadpool, so a slow
+    # query never blocks the event loop — ``/health`` and other requests stay
+    # responsive. As ``async def`` they ran directly on the loop and stalled
+    # the entire API.
     @app.post("/query", dependencies=[Depends(auth_dep)])
-    async def query(req: QueryRequest) -> dict:
+    def query(req: QueryRequest) -> dict:
         result = svc.query(req.q, seed_node=req.seed_node, top_k=req.top_k)
         fused = [
             {
@@ -121,7 +128,7 @@ def build_app(svc: Service, *, secret: str | None, bind_addr: str | None = None)
         }
 
     @app.get("/graph/stats", dependencies=[Depends(auth_dep)])
-    async def graph_stats() -> dict:
+    def graph_stats() -> dict:
         return svc.graph_stats()
 
     return app
