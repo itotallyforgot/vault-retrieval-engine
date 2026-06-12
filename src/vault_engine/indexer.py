@@ -6,10 +6,16 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
+
 from vault_engine.chunker import chunk_page
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import Embedder
-from vault_engine.inference import add_similarity_edges
+from vault_engine.inference import (
+    add_similarity_edges,
+    compute_page_vectors,
+    page_vector_from_chunks,
+)
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecStore
 from vault_engine.vault_reader import SkippedPage, iter_pages, parse_wikilinks, read_page
@@ -42,6 +48,14 @@ class Indexer:
         )
         self.graph: GraphStore = GraphStore()
         self._opened = False
+        # In-memory cache of per-page mean-pooled vectors, keyed by slug.
+        # INFERRED-edge inference needs every page's vector on every reindex;
+        # re-fetching them all from SQLite is ~99% of a per-file reindex's cost
+        # (measured ~2.3s at 1.5k pages). The cache lets a single-file reindex
+        # refresh only the changed slug's vector and reuse the rest, turning a
+        # multi-second per-save outage into tens of milliseconds. ``rebuild``
+        # repopulates it wholesale; ``reindex_page`` patches one entry.
+        self._page_vec_cache: dict[str, np.ndarray] = {}
 
     def open(self, force_reset: bool = False) -> None:
         """Open the vec store. force_reset=True wipes if model fingerprint mismatches."""
@@ -108,12 +122,30 @@ class Indexer:
         report.pages_skipped += len(skipped)
         return pages
 
+    def _refresh_page_vector(self, slug: str) -> None:
+        """Recompute and cache one page's mean-pooled vector from the vec store.
+
+        Evicts the slug from the cache when it has no chunks (deleted/empty
+        page). Called on per-file reindex so only the changed page touches the
+        DB for its vectors; every other page's vector is served from cache.
+        """
+        chunk_rows = self.vec.iter_chunks_for_page(slug)
+        if not chunk_rows:
+            self._page_vec_cache.pop(slug, None)
+            return
+        v = page_vector_from_chunks([row[1] for row in chunk_rows])
+        if v is None:
+            self._page_vec_cache.pop(slug, None)
+        else:
+            self._page_vec_cache[slug] = v
+
     def rebuild(self) -> IndexReport:
         """Re-read every page and re-index from scratch.
 
         Vec store: incremental — checksum-skip unchanged chunks WITHOUT
         re-encoding (see _index_page_chunks).
         Graph: full rebuild — cheap at vault scale.
+        Page-vector cache: rebuilt wholesale from the vec store.
         """
         report = IndexReport()
         pages = self._walk_pages(report)
@@ -124,12 +156,17 @@ class Indexer:
             report.pages_processed += 1
 
         self.graph.rebuild(pages)
+        # Repopulate the page-vector cache from the freshly-indexed store, then
+        # feed it to the INFERRED-edge pass. The cache becomes the warm input
+        # for subsequent per-file reindexes.
+        self._page_vec_cache = compute_page_vectors(self.graph, self.vec)
         # P3 #6: enrich with INFERRED similarity edges before community
         # detection so Louvain sees the full graph.
         add_similarity_edges(
             self.graph,
             self.vec,
             threshold=self.cfg.inferred_edge_threshold,
+            page_vecs=self._page_vec_cache,
         )
         self.graph.finalize_build()
         return report
@@ -144,6 +181,14 @@ class Indexer:
         the graph rebuild. Previous versions walked disk twice on
         ``rebuild()`` paths; this implementation passes the cached page list
         through.
+
+        Performance (E2): the INFERRED-edge pass reuses the in-memory
+        page-vector cache and refreshes only the changed slug's vector, instead
+        of re-reading every page's chunk vectors from SQLite. The graph
+        rebuild + Louvain still run in full (both sub-100ms at vault scale and
+        thus left exact, so EXTRACTED edges, link resolution, and community
+        labels stay correct with zero staleness), but the dominant cost — the
+        full per-reindex vector re-fetch — is eliminated.
         """
         report = IndexReport()
         if not path.exists():
@@ -161,7 +206,13 @@ class Indexer:
                 # skip accounting, so this oversize file isn't double-reported).
                 self.vec.delete_page(path.stem)
                 page = None
-            if page is not None:
+            if page is None:
+                # Oversize/unreadable: the slug still drives the vector-cache
+                # refresh below (its chunks were just dropped, so the refresh
+                # evicts it from the cache).
+                slug = path.stem
+            else:
+                slug = page.slug
                 page.wikilinks = parse_wikilinks(page.body)
                 chunks = chunk_page(page.slug, page.body)
                 if chunks:
@@ -177,10 +228,22 @@ class Indexer:
         # logged + counted via _walk_pages.
         pages = self._walk_pages(report)
         self.graph.rebuild(pages)
+
+        if self._page_vec_cache:
+            # Warm cache: refresh ONLY the changed slug's vector from the
+            # store; every other page's vector is reused from the cache.
+            self._refresh_page_vector(slug)
+        else:
+            # Cold cache (reindex_page called without a prior rebuild, e.g. in
+            # isolation): populate it fully so no page's INFERRED edges are
+            # dropped. Correctness over the fast path when there's no cache yet.
+            self._page_vec_cache = compute_page_vectors(self.graph, self.vec)
+
         add_similarity_edges(
             self.graph,
             self.vec,
             threshold=self.cfg.inferred_edge_threshold,
+            page_vecs=self._page_vec_cache,
         )
         self.graph.finalize_build()
         return report

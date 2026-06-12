@@ -5,7 +5,7 @@ import numpy as np
 import vault_engine.vault_reader as vault_reader
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
-from vault_engine.indexer import Indexer
+from vault_engine.indexer import Indexer, IndexReport
 
 
 class SpyEmbedder:
@@ -277,5 +277,175 @@ def test_indexer_reindex_single_page(sample_vault: Path, tmp_path: Path):
         assert report.chunks_changed >= 1
         # Graph should no longer have alpha->beta edge (body doesn't link beta).
         assert not idx.graph.has_edge("alpha", "beta")
+    finally:
+        idx.close()
+
+
+def _build_linked_vault(root: Path, n: int) -> Path:
+    """Create ``n`` cross-linked topic pages that share vocabulary, so the
+    INFERRED-edge pass has real work to do."""
+    vault = root / "vault"
+    (vault / "wiki" / "topics").mkdir(parents=True)
+    for i in range(n):
+        nxt = (i + 1) % n
+        (vault / "wiki" / "topics" / f"p{i}.md").write_text(
+            f"---\ntitle: Page {i}\naliases: []\ntags: [topic]\nsources: []\n"
+            f"last_updated: 2026-01-01\n---\n\n# Page {i}\n\n"
+            f"Body {i} shares vocab token{i % 5}. Links [[p{nxt}]].\n",
+            encoding="utf-8",
+        )
+    return vault
+
+
+def test_reindex_page_edges_match_cold_rebuild(tmp_path: Path):
+    """E2: the cached INFERRED-edge fast path must be correctness-equivalent to
+    a full cold rebuild from disk — identical edges, types and confidences.
+
+    This is the safety property behind the page-vector cache: it changes
+    performance, never results.
+    """
+    vault = _build_linked_vault(tmp_path, 12)
+    cfg = EngineConfig(
+        vault_path=vault,
+        cache_dir=tmp_path / "cache",
+        embedding_model="mock",
+        embedding_dim=16,
+        inferred_edge_threshold=0.85,
+    )
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=16))
+    idx.open()
+    try:
+        idx.rebuild()
+        # Mutate one page's content, then take the cached reindex path.
+        p3 = vault / "wiki" / "topics" / "p3.md"
+        p3.write_text(
+            "---\ntitle: Page 3\naliases: []\ntags: [topic]\nsources: []\n"
+            "last_updated: 2026-02-02\n---\n\n# Page 3\n\n"
+            "Body 3 now uses an entirely different token9 vocabulary set. Links [[p4]].\n",
+            encoding="utf-8",
+        )
+        idx.reindex_page(p3)
+
+        def edge_set(g):
+            return {
+                (u, v, d.get("edge_type"), round(float(d.get("confidence", -1.0)), 5))
+                for u, v, d in g.graph.graph.edges(data=True)
+            }
+
+        cached = edge_set(idx)
+    finally:
+        idx.close()
+
+    # Ground truth: a brand-new indexer doing a full cold rebuild over the same
+    # on-disk vault state.
+    cold = Indexer(
+        cfg=EngineConfig(
+            vault_path=vault,
+            cache_dir=tmp_path / "cache_cold",
+            embedding_model="mock",
+            embedding_dim=16,
+            inferred_edge_threshold=0.85,
+        ),
+        embedder=MockEmbedder(dim=16),
+    )
+    cold.open()
+    try:
+        cold.rebuild()
+        truth = {
+            (u, v, d.get("edge_type"), round(float(d.get("confidence", -1.0)), 5))
+            for u, v, d in cold.graph.graph.edges(data=True)
+        }
+    finally:
+        cold.close()
+
+    assert cached == truth, (
+        f"cached reindex diverged from cold rebuild: "
+        f"only-cached={cached - truth}, only-truth={truth - cached}"
+    )
+
+
+def test_reindex_page_reuses_vector_cache_for_unchanged_pages(tmp_path: Path):
+    """E2: a per-file reindex must NOT re-fetch every page's chunk vectors from
+    the store. Only the changed slug's vectors should be read for the page-
+    vector refresh (the rest come from the in-memory cache).
+    """
+    vault = _build_linked_vault(tmp_path, 8)
+    cfg = EngineConfig(
+        vault_path=vault,
+        cache_dir=tmp_path / "cache",
+        embedding_model="mock",
+        embedding_dim=16,
+        inferred_edge_threshold=0.85,
+    )
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=16))
+    idx.open()
+    try:
+        idx.rebuild()  # warms the cache
+
+        # Count iter_chunks_for_page calls per slug during the reindex.
+        real = idx.vec.iter_chunks_for_page
+        fetched: list[str] = []
+
+        def spy(slug: str):
+            fetched.append(slug)
+            return real(slug)
+
+        idx.vec.iter_chunks_for_page = spy  # type: ignore[method-assign]
+        p2 = vault / "wiki" / "topics" / "p2.md"
+        p2.write_text(
+            "---\ntitle: Page 2\naliases: []\ntags: [topic]\nsources: []\n"
+            "last_updated: 2026-03-03\n---\n\n# Page 2\n\nBody 2 changed token4. Links [[p3]].\n",
+            encoding="utf-8",
+        )
+        idx.reindex_page(p2)
+
+        # The vector refresh must touch ONLY the changed page, not all 8.
+        # (_index_page_chunks reads checksums, not vectors via this method, so
+        # the only iter_chunks_for_page caller on the warm path is the single
+        # changed slug's _refresh_page_vector.)
+        assert fetched == ["p2"], f"expected only p2 re-fetched, got {fetched}"
+    finally:
+        idx.close()
+
+
+def test_reindex_page_cold_cache_still_emits_inferred_edges(tmp_path: Path):
+    """E2: reindex_page called WITHOUT a prior rebuild (empty cache) must still
+    produce the full INFERRED-edge set — the cold-cache fallback populates the
+    whole cache rather than emitting a single-page (edgeless) graph.
+    """
+    vault = _build_linked_vault(tmp_path, 10)
+    # Low threshold so the mock-vector vault actually crosses it and emits
+    # INFERRED edges (mxbai vectors run far higher; mock vectors are diffuse).
+    cfg = EngineConfig(
+        vault_path=vault,
+        cache_dir=tmp_path / "cache",
+        embedding_model="mock",
+        embedding_dim=16,
+        inferred_edge_threshold=0.3,
+    )
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=16))
+    idx.open()
+    try:
+        # Index chunks for all pages WITHOUT building the graph/cache, to
+        # simulate a cold cache when reindex_page is first called.
+        from vault_engine.chunker import chunk_page
+        from vault_engine.vault_reader import read_page
+
+        for page_path in sorted(vault.rglob("*.md")):
+            pg = read_page(page_path)
+            chunks = chunk_page(pg.slug, pg.body)
+            idx._index_page_chunks(pg.slug, chunks, IndexReport())
+        assert idx._page_vec_cache == {}  # cache is cold
+
+        idx.reindex_page(vault / "wiki" / "topics" / "p0.md")
+        # Cold-cache fallback must have populated the cache to full page count
+        # and emitted the same INFERRED edges a cold rebuild would.
+        assert len(idx._page_vec_cache) == 10  # now fully warm
+        inferred = [
+            (u, v)
+            for u, v, d in idx.graph.graph.edges(data=True)
+            if d.get("edge_type") == "INFERRED"
+        ]
+        assert inferred, "cold-cache reindex emitted no INFERRED edges"
     finally:
         idx.close()
