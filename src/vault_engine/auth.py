@@ -12,6 +12,28 @@ Bound to Tailscale-only HTTP server in P2 — defense in depth on top of
 network isolation. If ``http_token`` is None in config, the HTTP server
 refuses to bind to non-loopback interfaces (config-enforced; see
 http_server.py).
+
+Secret rotation (restart-to-rotate)
+-----------------------------------
+There is a single active signing secret per process. ``verify_token`` accepts
+exactly one ``secret`` (the one captured by ``build_app`` at construction
+time), so rotation is **not** zero-downtime: there is no overlap window where
+both an old and a new secret validate.
+
+To rotate the secret:
+
+1. Set the new value in ``VAULT_ENGINE_HTTP_TOKEN`` (or the service config).
+2. Restart the engine (``serve`` / the launchd / NSSM service) so
+   ``build_app`` captures the new secret.
+3. Re-issue client JWTs signed with the new secret.
+
+Between steps 2 and 3, JWTs signed with the *old* secret return 401. Because
+tokens carry a required ``exp`` and are minted out-of-band, the practical
+rotation flow is: mint a short-overlap new token, swap the server secret,
+deploy the new token to clients, then let any old token expire. If true
+zero-downtime rotation is ever needed, ``verify_token`` would take a *list* of
+accepted secrets and try each — deferred until a multi-client deployment
+demands it (none does today; the server is single-tenant and Tailscale-bound).
 """
 
 import jwt
