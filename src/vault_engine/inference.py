@@ -47,10 +47,36 @@ def page_vector_from_chunks(chunks: list[np.ndarray]) -> np.ndarray | None:
     return mean / norm
 
 
+def compute_page_vectors(
+    graph: GraphStore,
+    vec_store: VecStore,
+) -> dict[str, np.ndarray]:
+    """Mean-pool every node's chunk vectors into a per-page vector.
+
+    Pulled out of ``add_similarity_edges`` so the (expensive) per-page vector
+    re-fetch from the vec store can be **cached** across reindexes. At ~1.5k
+    pages this loop is ~99% of a single reindex's cost — it reads every page's
+    chunk rows out of SQLite — while the downstream matmul + edge loop is
+    sub-100ms (see ``Indexer`` for the cache that avoids repeating this on
+    every file change). Pages with no chunks (empty body) are omitted.
+    """
+    page_vecs: dict[str, np.ndarray] = {}
+    for slug in graph.graph.nodes:
+        chunk_rows = vec_store.iter_chunks_for_page(slug)
+        if not chunk_rows:
+            continue
+        v = page_vector_from_chunks([row[1] for row in chunk_rows])
+        if v is not None:
+            page_vecs[slug] = v
+    return page_vecs
+
+
 def add_similarity_edges(
     graph: GraphStore,
     vec_store: VecStore,
     threshold: float = 0.8,
+    *,
+    page_vecs: dict[str, np.ndarray] | None = None,
 ) -> int:
     """Add symmetric INFERRED edges for page pairs above ``threshold``.
 
@@ -60,6 +86,16 @@ def add_similarity_edges(
     - pairs that already have an EXTRACTED edge in that direction (the
       reverse direction is still eligible for an INFERRED edge if the
       reverse EXTRACTED edge does not exist)
+    - nodes absent from the graph (a cached ``page_vecs`` may name a page that
+      a fresh ``graph.rebuild`` dropped; those are filtered out here)
+
+    Args:
+        page_vecs: Optional precomputed ``{slug: page_vector}`` map. When
+            given, the per-page vector re-fetch from the vec store is skipped
+            entirely — this is the cached fast path used on per-file reindex.
+            When ``None`` (the default), vectors are recomputed from the store,
+            preserving the original behaviour for cold rebuilds and callers
+            that don't maintain a cache.
 
     Returns the number of edges added.
 
@@ -68,15 +104,13 @@ def add_similarity_edges(
     matmul produces cosine similarities directly — no per-pair normalize
     needed.
     """
-    nodes = list(graph.graph.nodes)
-    page_vecs: dict[str, np.ndarray] = {}
-    for slug in nodes:
-        chunk_rows = vec_store.iter_chunks_for_page(slug)
-        if not chunk_rows:
-            continue
-        v = page_vector_from_chunks([row[1] for row in chunk_rows])
-        if v is not None:
-            page_vecs[slug] = v
+    if page_vecs is None:
+        page_vecs = compute_page_vectors(graph, vec_store)
+    else:
+        # A cached map can lag the graph by one rebuild (e.g. a page was just
+        # deleted). Restrict to slugs that are actually nodes so we never add
+        # an edge to a vanished page.
+        page_vecs = {s: v for s, v in page_vecs.items() if graph.graph.has_node(s)}
 
     if not page_vecs:
         return 0
