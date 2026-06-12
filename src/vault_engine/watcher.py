@@ -1,17 +1,23 @@
 """Filesystem watcher.
 
 Wraps watchdog. Emits per-file callbacks for markdown changes inside the vault,
-filtered to wiki/ and raw/. Debouncing is left to the consumer (the service
-layer in P2); here we just dedupe rapid duplicates within a small window.
+filtered to wiki/ and raw/.
+
+Debounce is **trailing-edge**: each relevant path gets a timer that resets on
+every event, and the callback fires ``debounce_seconds`` after the *last* event
+for that path. A burst of rapid writes therefore collapses into a single
+callback carrying the final state — unlike a leading-edge throttle, which fired
+on the first write and silently dropped every trailing write, leaving the index
+stale until some later unrelated edit. ``debounce_seconds <= 0`` short-circuits
+to a synchronous emit on every event (used by unit tests and ad-hoc callers).
 """
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from os import PathLike, fsdecode
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Timer
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -30,7 +36,10 @@ class _Handler(FileSystemEventHandler):
         self.cfg = cfg
         self.on_change = on_change
         self.debounce = debounce_seconds
-        self._last_seen: dict[Path, float] = {}
+        # Per-path pending timers. A new event for a path cancels the path's
+        # outstanding timer and arms a fresh one, so only the trailing event
+        # in a burst survives to fire the callback.
+        self._timers: dict[Path, Timer] = {}
         self._lock = Lock()
 
     def _is_relevant(self, src_path: str | bytes | PathLike[str] | PathLike[bytes]) -> Path | None:
@@ -46,17 +55,39 @@ class _Handler(FileSystemEventHandler):
             return None
         return path
 
+    def _fire(self, path: Path) -> None:
+        """Drop the path's timer record and deliver the callback."""
+        with self._lock:
+            self._timers.pop(path, None)
+        self.on_change(path)
+
     def _maybe_emit(self, src_path: str | bytes | PathLike[str] | PathLike[bytes]) -> None:
         path = self._is_relevant(src_path)
         if path is None:
             return
-        now = time.monotonic()
+        # Zero/negative debounce: emit synchronously. Keeps the unit-test
+        # contract (deterministic, no background thread) and lets callers
+        # opt out of debouncing entirely.
+        if self.debounce <= 0:
+            self._fire(path)
+            return
         with self._lock:
-            last = self._last_seen.get(path, 0.0)
-            if now - last < self.debounce:
-                return
-            self._last_seen[path] = now
-        self.on_change(path)
+            existing = self._timers.get(path)
+            if existing is not None:
+                existing.cancel()
+            timer = Timer(self.debounce, self._fire, args=(path,))
+            timer.daemon = True
+            self._timers[path] = timer
+            timer.start()
+
+    def cancel_pending(self) -> None:
+        """Cancel every outstanding debounce timer. Called on watcher stop so
+        no callback fires against a torn-down service."""
+        with self._lock:
+            timers = list(self._timers.values())
+            self._timers.clear()
+        for t in timers:
+            t.cancel()
 
     def on_modified(self, event: FileSystemEvent) -> None:
         if not event.is_directory:
@@ -90,6 +121,7 @@ class VaultWatcher:
         self.on_change = on_change
         self.debounce = debounce_seconds
         self._observer: BaseObserver | None = None
+        self._handler: _Handler | None = None
 
     def start(self) -> None:
         handler = _Handler(self.cfg, self.on_change, self.debounce)
@@ -97,9 +129,15 @@ class VaultWatcher:
         observer.schedule(handler, str(self.cfg.vault_path), recursive=True)
         observer.start()
         self._observer = observer
+        self._handler = handler
 
     def stop(self) -> None:
         if self._observer is not None:
             self._observer.stop()
             self._observer.join(timeout=5)
             self._observer = None
+        # Drop any debounce timers still pending after the observer stops so a
+        # late-firing callback can't hit a closed indexer.
+        if self._handler is not None:
+            self._handler.cancel_pending()
+            self._handler = None

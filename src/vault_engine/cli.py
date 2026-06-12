@@ -99,13 +99,21 @@ def status() -> None:
     cfg: EngineConfig = _state["cfg"]  # type: ignore[assignment]
     idx = _open_indexer()
     try:
-        from vault_engine.vault_reader import iter_pages
+        from vault_engine.vault_reader import SkippedPage, iter_pages
 
-        pages = iter_pages(cfg.vault_path)
+        skipped: list[SkippedPage] = []
+        pages = iter_pages(cfg.vault_path, skipped=skipped)
         console.print(f"[bold]vault[/bold]: {cfg.vault_path}")
         console.print(f"[bold]cache[/bold]: {cfg.cache_dir}")
         console.print(f"[bold]pages[/bold]: {len(pages)}")
         console.print(f"[bold]embedding model[/bold]: {cfg.embedding_model}")
+        # Surface unreadable/oversize pages loudly (E4) instead of dropping them.
+        skip_style = "yellow" if skipped else "green"
+        console.print(
+            f"[bold]skipped (unreadable)[/bold]: [{skip_style}]{len(skipped)}[/{skip_style}]"
+        )
+        for s in skipped:
+            console.print(f"  [yellow]skip[/yellow] {s.path}: {s.reason}")
     finally:
         idx.close()
 
@@ -131,6 +139,12 @@ def reindex(
         console.print(f"chunks indexed: {report.chunks_indexed}")
         console.print(f"chunks changed: {report.chunks_changed}")
         console.print(f"chunks unchanged: {report.chunks_unchanged}")
+        skip_style = "yellow" if report.pages_skipped else "green"
+        console.print(
+            f"pages skipped (unreadable): [{skip_style}]{report.pages_skipped}[/{skip_style}]"
+        )
+        for s in report.skipped:
+            console.print(f"  [yellow]skip[/yellow] {s.path}: {s.reason}")
     finally:
         idx.close()
 
