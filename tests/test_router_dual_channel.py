@@ -6,7 +6,7 @@ import pytest
 
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
-from vault_engine.router import Router
+from vault_engine.router import QueryMode, Router
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecStore
 
@@ -102,3 +102,25 @@ def test_router_return_dict_has_all_keys(populated_stores):
     result = router.dispatch("totp paper")
     for key in ("intent", "vector_hits", "topology_hits", "fused_hits"):
         assert key in result, f"missing key: {key}"
+
+
+def test_router_negation_derates_semantic_to_hybrid_and_runs_topology(populated_stores):
+    """A negated semantic query is de-rated to HYBRID, which engages topology.
+
+    Without negation the query stays SEMANTIC and runs vector-only (no seed, no
+    topology). The negation marker flips intent to HYBRID; with a seed anchoring
+    the walk, the topology channel now contributes. Proves the de-rate changes
+    retrieval, not just the label. (``topic-a`` is the seed because it is the only
+    node in this fixture with outbound edges.)
+    """
+    cfg, embedder, vec, graph = populated_stores
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+
+    plain = router.dispatch("totp paper")
+    assert str(plain["intent"]) == QueryMode.SEMANTIC
+    assert "topology" not in {c for hit in plain["fused_hits"] for c in hit.channels}
+
+    negated = router.dispatch("totp paper is not valid", seed_node="topic-a")
+    assert str(negated["intent"]) == QueryMode.HYBRID
+    channels = {c for hit in negated["fused_hits"] for c in hit.channels}
+    assert "topology" in channels, "HYBRID should engage the topology channel"
