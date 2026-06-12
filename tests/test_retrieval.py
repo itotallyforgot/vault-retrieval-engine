@@ -56,6 +56,36 @@ def test_source_returns_none_when_no_raw_path(sample_vault: Path, tmp_path: Path
         idx.close()
 
 
+def test_source_refuses_raw_path_escaping_vault(sample_vault: Path, tmp_path: Path):
+    """E6: a crafted raw_path that traverses outside the vault root must NOT be
+    read. raw_path is attacker-influenced frontmatter, so source() confines the
+    resolved target to the vault (mirroring the write-path containment guard).
+    """
+    # Plant a secret OUTSIDE the vault, then a source page that tries to read it
+    # via a traversal raw_path.
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP SECRET — must not leak", encoding="utf-8")
+    # Vault root is tmp_path/vault, so a single ".." climbs to tmp_path where the
+    # secret lives — outside the vault. That's the escape the guard must block.
+    rel_to_secret = Path("..") / "secret.txt"
+    (sample_vault / "wiki" / "sources" / "evil-source.md").write_text(
+        "---\n"
+        "title: Evil Source\n"
+        "tags: [source]\n"
+        f"raw_path: {rel_to_secret.as_posix()}\n"
+        "---\n\n# Evil Source\n\nTries to escape the vault.\n",
+        encoding="utf-8",
+    )
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        # Sanity: the traversal really does point at the secret on disk.
+        assert (sample_vault / rel_to_secret).resolve() == secret.resolve()
+        # …but source() must refuse to read outside the vault root.
+        assert r.source("evil-source") is None
+    finally:
+        idx.close()
+
+
 def test_consolidation_candidates_flags_orphan_raw(sample_vault: Path, tmp_path: Path):
     idx, r, _ = _open_indexed(sample_vault, tmp_path)
     try:
