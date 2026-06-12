@@ -16,11 +16,13 @@ lives at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N).
   around it. ([slice 1 of standalone-refactor], #13)
 - `overlays/githooks/post-commit.d/10-vault-engine.sh` — engine's reindex
   piece, extracted from the legacy monolithic hook. (#13)
-- `scripts/test-overlay-install.sh` — bash smoke harness for
-  `install-vault-overlays.sh`; 4 cases × 21 assertions covering
-  fresh-install, legacy-monolithic-hook auto-migration, custom-hook
-  refusal, and re-run idempotency. (#15)
-- CI job `overlay-install-smoke` running the harness on every PR. (#16)
+- `tests/smoke_install_vault_overlays_dispatcher.sh` — bash smoke harness
+  for `install-vault-overlays.sh` covering fresh-install,
+  legacy-monolithic-hook auto-migration, custom-hook refusal, and re-run
+  idempotency. Alongside `tests/smoke_post_commit_dispatcher.sh` (dispatcher
+  ordering) and `tests/smoke_check_blocked_terms.sh` (blocked-term scanner).
+  (#15)
+- CI job `smoke` running all three shell smoke harnesses on every PR. (#16)
 - README "Install onto your vault" section above the fold; opens with
   the canonical 3-step `install-vault-overlays.sh` flow. Top-of-README
   callout explicitly frames the engine as a plug-in for
@@ -75,8 +77,9 @@ auditable retrieval, eval harness with latency SLOs.
 ### Security & correctness
 - All 12 P0 review findings addressed (security, correctness, docs, perf).
 - 11 critical P1 fixes:
-  - SSRF guards, request size + rate limits, JWT exp claim required,
-    refuse-to-bind on non-loopback without secret.
+  - SSRF guards, request size caps (query body + top_k bounded at the
+    validation layer), JWT exp claim required, refuse-to-bind on
+    non-loopback without secret.
   - Service stop-race resolved, watcher rename emits both src + dest,
     slug collisions surface as `SlugCollisionError`, vec_store mutations
     atomic, file-size cap in reads.

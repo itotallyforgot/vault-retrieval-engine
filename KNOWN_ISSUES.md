@@ -2,13 +2,13 @@
 
 Issues surfaced by the v0.1.0 multi-axis review and the cleanup that followed. Listed honestly so consumers can decide whether the engine fits their use case at current quality.
 
-Last updated: 2026-05-04
+Last updated: 2026-06-11
 
 ## What landed in v0.1.0
 
 The multi-axis review surfaced 12 P0 + 14 critical-P1 findings. As of v0.1.0 ship:
 
-- **All security P0s fixed** — SSRF guards on URL ingestion, request size and rate limits on the HTTP server, JWT exp-claim required, refuse-to-bind on non-loopback without a secret, blocked-terms scan with case-insensitive matching.
+- **All security P0s fixed** — SSRF guards on URL ingestion, request size caps on the HTTP server (query body and `top_k` bounded at validation time; there is no request *rate* limiter), JWT exp-claim required, refuse-to-bind on non-loopback without a secret, blocked-terms scan with case-insensitive matching.
 - **All correctness P0s fixed** — service stop-race resolved, watcher rename emits both src and dest, slug collisions surface as SlugCollisionError, vec_store mutations atomic, file-size cap in reads.
 - **All documentation P0s fixed** — README CLI and eval-fixture schema match reality; sample vault expanded with multi-hop chains, alias chains, and an orphan; CI eval gate uses real expected_pages so it can fail.
 - **Performance P0s fixed** — graph walk replaced with bounded BFS, similarity-edge inference replaced with single-matmul, reindex_page does one disk walk instead of two.
@@ -51,6 +51,16 @@ Two pages with the same stem in different directories (`wiki/topics/foo.md` vs `
 - `url_ingester.fetch_url` lacks integration tests against mocked HTTP. Existing tests cover the extract / write paths only.
 - Watcher tests use timing-sensitive sleeps; may flake on slow CI runners.
 - `community.compute_communities` is tested but the reindex_page edge cases (community ID stability across single-page edits) are not.
+
+### Embedder is bag-of-words on word-order and negation
+
+The default embedder (`mxbai-embed-large-v1`) scores near-duplicate text that differs only by word order or a flipped claim as highly similar. Measured on the adversarial fixtures:
+
+- **Word-swap** pairs (same words, reordered to change meaning): cosine **0.96–0.99**.
+- **Shuffle** pairs (sentence-order shuffled): cosine **0.94–0.99**.
+- **Negation** pairs ("X is safe" vs "X is not safe"): cosine **0.68–0.81** — closer, but still high enough that pure semantic ranking can surface the wrong polarity.
+
+Consequence: semantic-only retrieval (and the INFERRED similarity edges, which use the same vectors) cannot reliably distinguish a statement from its negation or from a reordered variant. This is an inherent property of the model, not a bug in the engine. The router de-rates negation queries from pure `SEMANTIC` to `HYBRID` so a lexical/topology leg can disambiguate, but `HYBRID` today fuses vector + graph topology only — there is **no lexical (BM25/keyword) channel yet**, so the disambiguation is partial. A true lexical RRF channel is tracked for a future release. The adversarial fixtures (negation/word-swap/shuffle) exist as a regression gate so any embedder swap is measured against these axes before it lands.
 
 ### Performance at very large vaults
 

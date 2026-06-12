@@ -171,16 +171,17 @@ Installs a hint that nudges Claude Code Glob/Grep calls inside the vault toward 
 Engine config is layered (later wins):
 
 1. Defaults in `src/vault_engine/config.py`
-2. `vault.toml` at the vault root (if present)
-3. Environment variables (`VAULT_ENGINE_*`)
-4. CLI flags
+2. Environment variables (`VAULT_ENGINE_*`)
+3. CLI flags
+
+There is no config-file layer — config is a plain dataclass populated from defaults, the `VAULT_ENGINE_*` env vars (read by `load_config`), and CLI flags. The graph is held in memory and rebuilt at startup; it is not persisted to disk.
 
 Common knobs:
 
 | Setting | Default | Env var | Notes |
 |---|---|---|---|
 | `vault_path` | `--vault` flag required | — | The directory containing `wiki/` and `raw/` |
-| `cache_dir` | `~/.cache/vault-engine` | `VAULT_ENGINE_CACHE_DIR` | Embedding cache, vec DB, graph pickle |
+| `cache_dir` | `~/.cache/vault-engine` | `VAULT_ENGINE_CACHE_DIR` | Embedding cache + vec DB (`embeddings.db`) |
 | `embedding_model` | `mxbai-embed-large-v1` | — | Or `nomic-embed-text-v1.5`, `all-MiniLM-L6-v2` |
 | `inferred_threshold` | `0.85` | — | Cosine threshold for INFERRED graph edges |
 | `http_bind_addr` | `127.0.0.1` | `VAULT_ENGINE_BIND_ADDR` | HTTP server bind interface (private by default) |
@@ -253,7 +254,7 @@ The installer is idempotent — re-running reports skipped vs updated vs new fil
 src/vault_engine/
   __init__.py
   cli.py            # Typer commands: status, reindex, search, expand, source, eval, add, mcp, serve, hook
-  config.py         # Pydantic config model + load_config()
+  config.py         # EngineConfig dataclass + load_config() (env-var aware)
   vault_reader.py   # markdown reader, frontmatter parser, wikilink extractor
   chunker.py        # header-section chunker with checksum
   embedder.py       # SentenceTransformer + MockEmbedder

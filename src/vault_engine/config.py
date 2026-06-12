@@ -108,10 +108,6 @@ class EngineConfig:
         return self.cache_dir / "embeddings.db"
 
     @property
-    def graph_pickle(self) -> Path:
-        return self.cache_dir / "graph.pkl"
-
-    @property
     def wiki_dir(self) -> Path:
         return self.vault_path / "wiki"
 

@@ -23,7 +23,7 @@
     `$env:APPDATA\vault-retrieval\service-logs`.
 
 .PARAMETER CacheDir
-    Cache directory for embeddings.db + graph.pkl. Pass an absolute path
+    Cache directory for embeddings.db (the vec store). Pass an absolute path
     that is readable + writable by `LocalSystem` (the service account) and
     by your user account (so `vault-engine reindex` can pre-warm it). The
     default `%APPDATA%\vault-retrieval` resolves to a different folder per
