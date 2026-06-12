@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import vault_engine.vault_reader as vault_reader
 from vault_engine.vault_reader import (
+    SkippedPage,
     build_alias_map,
     iter_pages,
     parse_wikilinks,
@@ -78,3 +80,35 @@ def test_build_alias_map_maps_titles_aliases_slugs(sample_vault):
     assert alias_map["alpha"].slug == "alpha"
     assert alias_map["alpha-thing"].slug == "alpha"
     assert alias_map["beta"].slug == "beta"
+
+
+def test_iter_pages_reports_oversize_skip(sample_vault, monkeypatch):
+    """E4: oversize pages are surfaced via the ``skipped`` out-param, not dropped.
+
+    The good pages still come back; the oversize one lands in ``skipped`` with a
+    reason, and is absent from the returned page list.
+    """
+    # Shrink the cap (well above the ~230-byte fixtures, below the 3 KB page
+    # below) so one file trips it without writing a real 10 MiB file.
+    monkeypatch.setattr(vault_reader, "_MAX_PAGE_BYTES", 2000)
+    big = sample_vault / "wiki" / "topics" / "huge.md"
+    big.write_text("---\ntitle: Huge\n---\n\n" + ("x" * 3000) + "\n", encoding="utf-8")
+
+    skipped: list[SkippedPage] = []
+    pages = iter_pages(sample_vault, skipped=skipped)
+
+    slugs = {p.slug for p in pages}
+    assert "huge" not in slugs  # dropped from index
+    assert "alpha" in slugs  # good pages still indexed
+    assert [s.path for s in skipped] == [big]
+    assert "too large" in skipped[0].reason
+
+
+def test_iter_pages_without_skipped_arg_stays_silent(sample_vault, monkeypatch):
+    """Back-compat: callers that omit ``skipped`` get plain ``list[Page]`` and no error."""
+    monkeypatch.setattr(vault_reader, "_MAX_PAGE_BYTES", 2000)
+    (sample_vault / "wiki" / "topics" / "huge.md").write_text(
+        "---\ntitle: Huge\n---\n\n" + ("x" * 3000) + "\n", encoding="utf-8"
+    )
+    pages = iter_pages(sample_vault)  # no skipped arg
+    assert "huge" not in {p.slug for p in pages}
