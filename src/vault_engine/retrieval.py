@@ -73,7 +73,14 @@ class Retrieval:
 
     # ---- source ----
     def source(self, page_slug: str) -> str | None:
-        """For a wiki/source page, return contents of its `raw_path` if set."""
+        """For a wiki/source page, return contents of its `raw_path` if set.
+
+        ``raw_path`` is attacker-influenced frontmatter (it comes from page
+        content, which may be scraped or otherwise untrusted), so the resolved
+        target is confined to the vault root before reading — a crafted
+        ``raw_path: ../../etc/passwd`` must not escape. This mirrors the
+        containment guard on the write path in ``url_ingester.write_raw_file``.
+        """
         path = self._path_for_slug(page_slug)
         if path is None:
             return None
@@ -81,7 +88,13 @@ class Retrieval:
         raw_rel = page.frontmatter.get("raw_path")
         if not raw_rel:
             return None
-        raw_abs = (self.cfg.vault_path / Path(raw_rel)).resolve()
+        vault_root = self.cfg.vault_path.resolve()
+        raw_abs = (vault_root / Path(str(raw_rel))).resolve()
+        try:
+            raw_abs.relative_to(vault_root)
+        except ValueError:
+            # raw_path escapes the vault root (path traversal); refuse.
+            return None
         if not raw_abs.exists():
             return None
         return raw_abs.read_text(encoding="utf-8")

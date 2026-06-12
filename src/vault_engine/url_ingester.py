@@ -51,24 +51,8 @@ class ExtractedArticle:
     published: str | None  # raw string from the page, not parsed
 
 
-def _is_unsafe_host(host: str) -> bool:
-    """Return True if host resolves to a private/loopback/link-local/reserved IP.
-
-    Fail-closed semantics: unresolvable hosts return True. This blocks SSRF
-    via DNS rebinding by checking the resolved IP at fetch time, not just
-    parsing the hostname.
-    """
-    if not host:
-        return True
-    # Try direct IP literal first (handles "192.168.0.1", "::1", etc.)
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        # Hostname — resolve via DNS.
-        try:
-            ip = ipaddress.ip_address(socket.gethostbyname(host))
-        except (OSError, ValueError):
-            return True  # fail closed
+def _ip_is_unsafe(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True for any IP we must never connect to (SSRF denylist)."""
     return (
         ip.is_private
         or ip.is_loopback
@@ -79,11 +63,70 @@ def _is_unsafe_host(host: str) -> bool:
     )
 
 
-def _validate_target(url: str) -> str:
-    """Validate URL scheme and resolved host. Returns normalized URL.
+def _resolve_and_validate(host: str, port: int) -> str:
+    """Resolve ``host`` and return a single safe IP literal to connect to.
+
+    Resolves **all** A and AAAA records via ``getaddrinfo`` (the previous
+    implementation used ``gethostbyname``, which is IPv4-only and silently
+    skipped every AAAA record). EVERY resolved address must pass the denylist:
+    if any one is private/loopback/link-local/reserved/etc. we fail closed,
+    because a DNS-rebinding attacker only needs one malicious record in the
+    set to pivot. The returned IP is what the caller pins the connection to,
+    so httpx connects to the exact address we validated instead of
+    re-resolving the hostname (which is the TOCTOU window this closes).
+
+    Fail-closed: an unresolvable or empty host raises.
 
     Raises:
-        FetchError: on disallowed scheme, missing host, or unsafe-host resolution.
+        FetchError: empty host, resolution failure, or any unsafe resolved IP.
+    """
+    if not host:
+        raise FetchError("missing host")
+    # IP literal? Validate it directly; no DNS involved.
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        if _ip_is_unsafe(literal):
+            raise FetchError(f"refusing fetch: {host!r} is a private/loopback/reserved IP")
+        return host
+
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError as e:
+        raise FetchError(f"cannot resolve host {host!r}: {e}") from e
+    resolved: list[str] = []
+    for info in infos:
+        # sockaddr[0] is the address string for both AF_INET and AF_INET6;
+        # str() satisfies the union type the stubs give getaddrinfo.
+        addr = str(info[4][0])
+        # Strip any IPv6 scope id ("fe80::1%eth0") before parsing.
+        addr = addr.split("%", 1)[0]
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if _ip_is_unsafe(ip):
+            raise FetchError(
+                f"refusing fetch: {host!r} resolves to private/loopback/reserved IP {addr}"
+            )
+        resolved.append(addr)
+    if not resolved:
+        raise FetchError(f"no usable address for host {host!r}")
+    # Prefer IPv4 for connection stability; any address is already validated.
+    resolved.sort(key=lambda a: ":" in a)
+    return resolved[0]
+
+
+def _validate_target(url: str) -> tuple[str, str, str]:
+    """Validate scheme + host and resolve+pin a safe IP for ``url``.
+
+    Returns ``(url, host, pinned_ip)``: the (unchanged) URL, its hostname, and
+    the validated IP literal the connection must be pinned to.
+
+    Raises:
+        FetchError: disallowed scheme, missing host, or unsafe-host resolution.
     """
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
@@ -91,9 +134,21 @@ def _validate_target(url: str) -> str:
     host = parsed.hostname
     if not host:
         raise FetchError(f"missing host in url: {url!r}")
-    if _is_unsafe_host(host):
-        raise FetchError(f"refusing fetch: {host!r} resolves to private/loopback/reserved IP")
-    return url
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    pinned_ip = _resolve_and_validate(host, port)
+    return url, host, pinned_ip
+
+
+def _pinned_url(url: str, host: str, pinned_ip: str) -> str:
+    """Rewrite ``url`` so the connection targets ``pinned_ip`` instead of
+    re-resolving ``host``. The original host travels in the ``Host`` header and
+    TLS SNI (set by the caller), so routing and cert verification still use the
+    real hostname; only the socket destination is pinned."""
+    parsed = urlparse(url)
+    # Bracket IPv6 literals for the authority component.
+    host_part = f"[{pinned_ip}]" if ":" in pinned_ip else pinned_ip
+    netloc = f"{host_part}:{parsed.port}" if parsed.port else host_part
+    return parsed._replace(netloc=netloc).geturl()
 
 
 def fetch_url(
@@ -106,9 +161,15 @@ def fetch_url(
 ) -> str:
     """HTTP GET with SSRF, redirect, and size protections.
 
-    - Original URL and every redirect target re-validated against an
-      RFC1918 / loopback / link-local / reserved-IP denylist.
-    - Redirect count capped (default 5).
+    - The original URL and every redirect target are resolved and validated
+      against an RFC1918 / loopback / link-local / reserved-IP denylist
+      (all A *and* AAAA records; fail closed if any is unsafe).
+    - The connection is **pinned to the validated IP** — httpx connects to the
+      exact address that passed the check rather than re-resolving the
+      hostname, closing the DNS-rebinding TOCTOU window. The real hostname
+      still rides in the ``Host`` header and TLS SNI, so HTTP routing and
+      certificate verification are unchanged.
+    - Redirect count capped (default 5); each hop is re-validated and re-pinned.
     - Response size capped (default 10 MiB).
     - Content-Type checked before reading body.
 
@@ -116,24 +177,33 @@ def fetch_url(
         FetchError: any disallowed condition (private IP, redirect loop,
             oversize body, non-HTML content-type, network error).
     """
-    headers = {
+    base_headers = {
         "User-Agent": user_agent,
         "Accept": "text/html,application/xhtml+xml,text/plain;q=0.5",
     }
-    current = _validate_target(url)
+    current, host, pinned_ip = _validate_target(url)
     try:
         with httpx.Client(
             timeout=timeout,
             follow_redirects=False,
-            headers=headers,
+            headers=base_headers,
         ) as client:
             for hop in range(max_redirects + 1):
-                resp = client.get(current)
+                # Connect to the validated IP; preserve the real host for
+                # routing (Host header) and TLS (sni_hostname → SNI + cert
+                # hostname verification).
+                resp = client.get(
+                    _pinned_url(current, host, pinned_ip),
+                    headers={"Host": host},
+                    extensions={"sni_hostname": host},
+                )
                 if resp.is_redirect and hop < max_redirects:
                     location = resp.headers.get("location", "")
                     if not location:
                         raise FetchError("redirect without location header")
-                    current = _validate_target(urljoin(current, location))
+                    # Resolve Location against the *real* URL, then re-validate
+                    # and re-pin the new target before following it.
+                    current, host, pinned_ip = _validate_target(urljoin(current, location))
                     continue
                 resp.raise_for_status()
                 ctype = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
