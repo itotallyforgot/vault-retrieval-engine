@@ -133,3 +133,5 @@ jobs:
             --fixtures tests/fixtures/eval_fixtures.jsonl \
             --embedder mock \
             --threshold 0.85
+      - name: Bag-of-words adversarial regression gate (OGR-206)
+        run: uv run pytest tests/test_bow_adversarial.py -q
