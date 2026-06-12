@@ -115,7 +115,7 @@ Tool surface:
 
 | Tool | HTTP equivalent | Description |
 |---|---|---|
-| `query_graph` | `POST /query` | Multi-hop graph search (vector + topology RRF) |
+| `query_graph` | `POST /query` | Multi-hop graph search (vector + lexical BM25 + topology RRF) |
 | `graph_stats` | `GET /graph/stats` | Counts |
 | `get_node` | — | Node details |
 | `get_neighbors` | — | Direct neighbors with edge metadata |

@@ -189,17 +189,25 @@ class Router:
         seed_node: str | None = None,
         top_k: int = 10,
     ) -> dict:
-        """Fan out to vector (always) and topology (when warranted). Fuse via RRF.
+        """Fan out to vector + lexical (always) and topology (when warranted). Fuse via RRF.
 
         Returns a dict with keys:
             intent        – QueryMode value string
             vector_hits   – list[RankedHit] from vec store (up to top_k)
+            lexical_hits  – list[RankedHit] from FTS5/BM25 (up to top_k)
             topology_hits – list[RankedHit] from graph walk (up to top_k; [] if skipped)
             fused_hits    – list[FusedHit] after RRF merge (up to top_k)
         """
         intent = self._classify(query)
 
         vector_hits = self._vector_search(query, top_k=top_k * 2)
+        # Lexical (BM25) channel: always run. It is the keyword/word-order leg
+        # the bag-of-words embedder can't provide (it scores "X is safe" ~=
+        # "X is not safe"). This is what makes HYBRID actually disambiguate
+        # negation queries — previously HYBRID was vector + topology only, with
+        # no lexical signal. Pages absent from FTS (none, post-reindex) simply
+        # contribute nothing.
+        lexical_hits = self._lexical_search(query, top_k=top_k * 2)
 
         topology_hits: list[RankedHit] = []
         # HYBRID is included alongside MULTI_HOP because it explicitly mixes
@@ -210,22 +218,29 @@ class Router:
             if anchor:
                 topology_hits = topology_walk(self.graph_store, seed=anchor, depth=3)
 
-        if topology_hits:
-            fused = reciprocal_rank_fusion([vector_hits, topology_hits])[:top_k]
-        else:
+        # Fuse every non-empty channel. RRF takes N rankings, so adding the
+        # lexical channel is a list entry — no fusion-math change.
+        channels = [r for r in (vector_hits, lexical_hits, topology_hits) if r]
+        if len(channels) > 1:
+            fused = reciprocal_rank_fusion(channels)[:top_k]
+        elif channels:
+            only = channels[0]
             fused = [
                 FusedHit(
                     doc_id=h.doc_id,
                     rrf_score=h.score,
-                    channels=["vector"],
-                    per_channel_scores={"vector": h.score},
+                    channels=[h.channel],
+                    per_channel_scores={h.channel: h.score},
                 )
-                for h in vector_hits[:top_k]
+                for h in only[:top_k]
             ]
+        else:
+            fused = []
 
         return {
             "intent": intent,
             "vector_hits": vector_hits[:top_k],
+            "lexical_hits": lexical_hits[:top_k],
             "topology_hits": topology_hits[:top_k],
             "fused_hits": fused,
         }
@@ -256,6 +271,22 @@ class Router:
         return [
             RankedHit(doc_id=hit.page_slug, score=hit.distance, channel="vector") for hit in raw
         ]
+
+    def _lexical_search(self, query: str, *, top_k: int) -> list[RankedHit]:
+        """Run BM25 keyword search and return list[RankedHit] (channel='lexical').
+
+        Dedupes to the best (lowest BM25 score) chunk per page so a page that
+        matches in several chunks doesn't flood the channel — the channel ranks
+        pages, mirroring how the vector channel is consumed downstream.
+        """
+        raw = self.vec_store.search_lexical(query, top_k=top_k * 2)
+        best_by_page: dict[str, float] = {}
+        for hit in raw:
+            prev = best_by_page.get(hit.page_slug)
+            if prev is None or hit.distance < prev:
+                best_by_page[hit.page_slug] = hit.distance
+        ranked = sorted(best_by_page.items(), key=lambda kv: kv[1])[:top_k]
+        return [RankedHit(doc_id=slug, score=score, channel="lexical") for slug, score in ranked]
 
     def _infer_seed(self, vector_hits: list) -> str | None:
         """Return the top vector hit's doc_id if it exists in the graph, else None."""
