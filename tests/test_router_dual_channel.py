@@ -96,11 +96,11 @@ def test_router_multi_hop_intent_triggers_topology(populated_stores):
 
 
 def test_router_return_dict_has_all_keys(populated_stores):
-    """Dispatch always returns all four keys regardless of channel path."""
+    """Dispatch always returns all keys regardless of channel path."""
     cfg, embedder, vec, graph = populated_stores
     router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
     result = router.dispatch("totp paper")
-    for key in ("intent", "vector_hits", "topology_hits", "fused_hits"):
+    for key in ("intent", "vector_hits", "lexical_hits", "topology_hits", "fused_hits"):
         assert key in result, f"missing key: {key}"
 
 
@@ -124,3 +124,45 @@ def test_router_negation_derates_semantic_to_hybrid_and_runs_topology(populated_
     assert str(negated["intent"]) == QueryMode.HYBRID
     channels = {c for hit in negated["fused_hits"] for c in hit.channels}
     assert "topology" in channels, "HYBRID should engage the topology channel"
+
+
+def test_router_includes_lexical_channel(populated_stores):
+    """E3: the lexical (BM25) channel runs alongside vector and shows up in the
+    fused output's channel provenance."""
+    cfg, embedder, vec, graph = populated_stores
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    result = router.dispatch("totp paper")
+    # The lexical channel found the matching page(s).
+    assert result["lexical_hits"], "lexical channel returned nothing for a keyword query"
+    channels_seen = {c for hit in result["fused_hits"] for c in hit.channels}
+    assert "lexical" in channels_seen
+    assert "vector" in channels_seen
+
+
+def test_router_lexical_channel_surfaces_exact_keyword(populated_stores):
+    """The lexical channel ranks the page that literally contains the keyword.
+
+    'totp' lives only in source-s's chunk text, so the lexical channel must
+    return source-s for that exact term — keyword matching the bag-of-words
+    embedder's mock vectors don't guarantee.
+    """
+    cfg, embedder, vec, graph = populated_stores
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    result = router.dispatch("totp")
+    lexical_docs = [h.doc_id for h in result["lexical_hits"]]
+    assert lexical_docs == ["source-s"]
+
+
+def test_router_lexical_dedupes_to_best_chunk_per_page(populated_stores):
+    """A page matching in multiple chunks contributes once (its best score)."""
+    cfg, embedder, vec, graph = populated_stores
+    # Add a second chunk to topic-a that also mentions the keyword.
+    import hashlib
+
+    for idx, text in [(1, "auth again auth"), (2, "auth once more")]:
+        emb = embedder.encode([text])[0]
+        vec.upsert("topic-a", idx, text, hashlib.sha256(text.encode()).hexdigest(), emb)
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    result = router.dispatch("auth")
+    docs = [h.doc_id for h in result["lexical_hits"]]
+    assert docs.count("topic-a") == 1  # deduped despite 3 matching chunks

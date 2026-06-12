@@ -157,15 +157,21 @@ def test_indexer_reindex_page_preserves_unchanged_chunks(sample_vault: Path, tmp
 
 
 def test_indexer_rebuild_emits_inferred_edges(sample_vault: Path, tmp_path: Path):
-    """rebuild() should populate INFERRED edges between semantically close pages
-    that aren't already connected by an EXTRACTED wikilink. Threshold is read
-    from EngineConfig.inferred_edge_threshold.
+    """rebuild() should populate similarity edges between semantically close
+    pages that aren't already connected by an EXTRACTED wikilink. Threshold is
+    read from EngineConfig.inferred_edge_threshold.
+
+    Edge type splits by confidence band (E3): >= AMBIGUOUS_CEILING (0.95) is
+    INFERRED, [threshold, 0.95) is AMBIGUOUS. Mock vectors on the tiny sample
+    vault land in the AMBIGUOUS band, so this exercises that path.
     """
+    from vault_engine.inference import AMBIGUOUS_CEILING
+
     cfg = EngineConfig(
         vault_path=sample_vault,
         cache_dir=tmp_path / "cache",
         # Mock embedder produces wide-spread vectors; pick a low threshold so
-        # we exercise the INFERRED path on the tiny sample vault.
+        # we exercise the similarity-edge path on the tiny sample vault.
         inferred_edge_threshold=0.3,
     )
     cfg.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -173,20 +179,23 @@ def test_indexer_rebuild_emits_inferred_edges(sample_vault: Path, tmp_path: Path
     idx.open()
     try:
         idx.rebuild()
-        edge_types = {
-            (s, d): data.get("edge_type") for s, d, data in idx.graph.graph.edges(data=True)
-        }
+        edges = {(s, d): data for s, d, data in idx.graph.graph.edges(data=True)}
+        edge_types = {k: v.get("edge_type") for k, v in edges.items()}
         # The fixture's alpha→beta wikilink must remain EXTRACTED.
         assert edge_types[("alpha", "beta")] == "EXTRACTED"
-        # At least one INFERRED edge must be present.
-        assert "INFERRED" in edge_types.values()
-        # All INFERRED edges must carry a confidence in [threshold, 1.0].
-        for (_s, _d), data in (
-            ((s, d), idx.graph.graph.edges[s, d])
-            for (s, d), t in edge_types.items()
-            if t == "INFERRED"
-        ):
-            assert cfg.inferred_edge_threshold <= float(data["confidence"]) <= 1.0
+        # At least one inferred edge (INFERRED or AMBIGUOUS) must be present.
+        inferred_like = {"INFERRED", "AMBIGUOUS"}
+        assert inferred_like & set(edge_types.values())
+        # Every inferred edge's type must match its confidence band, and its
+        # confidence must sit in [threshold, 1.0].
+        for (_s, _d), data in edges.items():
+            t = data.get("edge_type")
+            if t not in inferred_like:
+                continue
+            conf = float(data["confidence"])
+            assert cfg.inferred_edge_threshold <= conf <= 1.0
+            expected = "INFERRED" if conf >= AMBIGUOUS_CEILING else "AMBIGUOUS"
+            assert t == expected, f"edge conf={conf} should be {expected}, got {t}"
     finally:
         idx.close()
 
@@ -415,7 +424,7 @@ def test_reindex_page_cold_cache_still_emits_inferred_edges(tmp_path: Path):
     """
     vault = _build_linked_vault(tmp_path, 10)
     # Low threshold so the mock-vector vault actually crosses it and emits
-    # INFERRED edges (mxbai vectors run far higher; mock vectors are diffuse).
+    # similarity edges (mxbai vectors run far higher; mock vectors are diffuse).
     cfg = EngineConfig(
         vault_path=vault,
         cache_dir=tmp_path / "cache",
@@ -439,13 +448,16 @@ def test_reindex_page_cold_cache_still_emits_inferred_edges(tmp_path: Path):
 
         idx.reindex_page(vault / "wiki" / "topics" / "p0.md")
         # Cold-cache fallback must have populated the cache to full page count
-        # and emitted the same INFERRED edges a cold rebuild would.
+        # and emitted the same similarity edges a cold rebuild would. The band
+        # split (E3) labels these INFERRED or AMBIGUOUS by strength; this test
+        # asserts the cold-cache path emits the similarity relation at all, not
+        # which band the diffuse mock vectors land in.
         assert len(idx._page_vec_cache) == 10  # now fully warm
-        inferred = [
+        similarity = [
             (u, v)
             for u, v, d in idx.graph.graph.edges(data=True)
-            if d.get("edge_type") == "INFERRED"
+            if d.get("relation") == "similarity"
         ]
-        assert inferred, "cold-cache reindex emitted no INFERRED edges"
+        assert similarity, "cold-cache reindex emitted no similarity edges"
     finally:
         idx.close()

@@ -10,6 +10,7 @@ Schema:
 
 from __future__ import annotations
 
+import re
 import sqlite3
 import struct
 from dataclasses import dataclass
@@ -69,6 +70,21 @@ class VecStore:
                 checksum TEXT NOT NULL,
                 rowid INTEGER NOT NULL,
                 PRIMARY KEY (page_slug, chunk_idx)
+            )
+            """
+        )
+        # FTS5 lexical index over chunk text (BM25). This is the third
+        # retrieval channel (vector / topology / lexical): exact-keyword and
+        # word-order matching that the bag-of-words embedder cannot do (it
+        # scores "X is safe" ~= "X is not safe"). Its rowid mirrors the
+        # ``chunks`` rowid so deletes stay coordinated. page_slug / chunk_idx
+        # are UNINDEXED (stored, not tokenized) so a hit can name its chunk.
+        self._conn.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                content,
+                page_slug UNINDEXED,
+                chunk_idx UNINDEXED
             )
             """
         )
@@ -150,6 +166,8 @@ class VecStore:
                     "DELETE FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
                     (page_slug, chunk_idx),
                 )
+                # Keep the lexical index in lock-step with the vector store.
+                self._conn.execute("DELETE FROM chunks_fts WHERE rowid=?", (existing_rowid,))
             cur = self._conn.execute(
                 "INSERT INTO chunks(embedding, page_slug, chunk_idx, content, checksum) VALUES(?, ?, ?, ?, ?)",
                 (blob, page_slug, chunk_idx, content, checksum),
@@ -158,6 +176,11 @@ class VecStore:
             self._conn.execute(
                 "INSERT INTO chunk_meta(page_slug, chunk_idx, checksum, rowid) VALUES(?, ?, ?, ?)",
                 (page_slug, chunk_idx, checksum, new_rowid),
+            )
+            # Mirror the chunk into the FTS index under the SAME rowid.
+            self._conn.execute(
+                "INSERT INTO chunks_fts(rowid, content, page_slug, chunk_idx) VALUES(?, ?, ?, ?)",
+                (new_rowid, content, page_slug, chunk_idx),
             )
         return True
 
@@ -169,6 +192,7 @@ class VecStore:
         with self._conn:
             for rid in rowids:
                 self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rid,))
+                self._conn.execute("DELETE FROM chunks_fts WHERE rowid=?", (rid,))
             self._conn.execute("DELETE FROM chunk_meta WHERE page_slug=?", (page_slug,))
         return len(rowids)
 
@@ -188,6 +212,7 @@ class VecStore:
         rowid = row[0]
         with self._conn:
             self._conn.execute("DELETE FROM chunks WHERE rowid=?", (rowid,))
+            self._conn.execute("DELETE FROM chunks_fts WHERE rowid=?", (rowid,))
             self._conn.execute(
                 "DELETE FROM chunk_meta WHERE page_slug=? AND chunk_idx=?",
                 (page_slug, chunk_idx),
@@ -253,6 +278,56 @@ class VecStore:
                 content=row[2],
                 checksum=row[3],
                 distance=row[4],
+            )
+            for row in cur.fetchall()
+        ]
+
+    @staticmethod
+    def _fts_query(query: str) -> str:
+        """Turn free text into a safe FTS5 MATCH expression.
+
+        Each alphanumeric token is wrapped in double quotes so FTS5 treats it
+        as a bare string, neutralising query operators a user (or a page) might
+        inject (``"``, ``*``, ``:``, ``NEAR``, ``AND``/``OR``, parentheses).
+        Tokens are OR-ed so any keyword can match — recall over precision at
+        the channel level; RRF and the other channels handle precision.
+        Returns ``""`` when the query has no usable tokens.
+        """
+        tokens = re.findall(r"\w+", query.lower())
+        if not tokens:
+            return ""
+        return " OR ".join(f'"{t}"' for t in tokens)
+
+    def search_lexical(self, query: str, top_k: int = 10) -> list[VecHit]:
+        """BM25 keyword search over chunk text (the lexical channel).
+
+        Complements the vector channel: exact-term and word-order matching the
+        bag-of-words embedder cannot do. ``distance`` carries the BM25 score
+        (SQLite returns it negative, more-negative = better), so ascending sort
+        is best-first, matching the vector channel's lower-is-better convention.
+        Empty/whitespace/operator-only queries return ``[]``.
+        """
+        assert self._conn is not None
+        match = self._fts_query(query)
+        if not match:
+            return []
+        cur = self._conn.execute(
+            """
+            SELECT page_slug, chunk_idx, content, bm25(chunks_fts) AS score
+            FROM chunks_fts
+            WHERE chunks_fts MATCH ?
+            ORDER BY score
+            LIMIT ?
+            """,
+            (match, top_k),
+        )
+        return [
+            VecHit(
+                page_slug=row[0],
+                chunk_idx=row[1],
+                content=row[2],
+                checksum="",  # FTS rows don't carry the chunk checksum
+                distance=row[3],
             )
             for row in cur.fetchall()
         ]
