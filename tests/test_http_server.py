@@ -142,3 +142,28 @@ def test_query_with_auth_rejects_empty_bearer_token(app_with_auth):
     assert r.status_code == 401, (
         f"Expected 401 for empty bearer token, got {r.status_code}: {r.json()}"
     )
+
+
+def test_graph_stats_endpoint_returns_summary(app_no_auth):
+    """/graph/stats returns node/edge/community counts and an edge_types map.
+
+    Regression for E1 — the route is now a plain ``def`` (threadpool-run) and
+    reads the graph through the lock-guarded service facade.
+    """
+    client = TestClient(app_no_auth)
+    r = client.get("/graph/stats")
+    assert r.status_code == 200
+    data = r.json()
+    assert set(data) >= {"nodes", "edges", "communities", "edge_types"}
+    # Sample vault has alpha/beta/source/raw pages, so at least the wiki nodes.
+    assert data["nodes"] >= 2
+    assert isinstance(data["edge_types"], dict)
+
+
+def test_graph_stats_endpoint_requires_auth(app_with_auth):
+    """/graph/stats sits behind the same auth gate as /query."""
+    client = TestClient(app_with_auth)
+    assert client.get("/graph/stats").status_code == 401
+    token = _bearer_token()
+    r = client.get("/graph/stats", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200

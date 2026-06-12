@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
+import vault_engine.vault_reader as vault_reader
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer
@@ -206,6 +207,56 @@ def test_indexer_inferred_edges_never_overwrite_extracted(sample_vault: Path, tm
         ab = idx.graph.graph.edges["alpha", "beta"]
         assert ab["edge_type"] == "EXTRACTED"
         assert ab["relation"] == "wikilink"
+    finally:
+        idx.close()
+
+
+def test_indexer_rebuild_reports_skipped_pages(sample_vault: Path, tmp_path: Path, monkeypatch):
+    """E4: rebuild() counts oversize/unreadable pages on the report and logs them.
+
+    Previously these were swallowed inside iter_pages with a never-wired
+    'surface via logging at the indexer layer' comment. Now the report carries
+    pages_skipped + the SkippedPage list.
+    """
+    monkeypatch.setattr(vault_reader, "_MAX_PAGE_BYTES", 2000)
+    big = sample_vault / "wiki" / "topics" / "huge.md"
+    big.write_text("---\ntitle: Huge\n---\n\n" + ("x" * 3000) + "\n", encoding="utf-8")
+
+    cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        report = idx.rebuild()
+        assert report.pages_skipped == 1
+        assert [s.path for s in report.skipped] == [big]
+        assert "too large" in report.skipped[0].reason
+        # The oversize page must not have been indexed.
+        assert not idx.graph.has_node("huge")
+    finally:
+        idx.close()
+
+
+def test_indexer_reindex_oversize_page_is_skipped_not_raised(
+    sample_vault: Path, tmp_path: Path, monkeypatch
+):
+    """E4: reindex_page on an oversize file records a skip instead of raising
+    into the watcher callback (which would otherwise be logged as a failure)."""
+    cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        # Now make alpha oversize and reindex it.
+        monkeypatch.setattr(vault_reader, "_MAX_PAGE_BYTES", 2000)
+        alpha = sample_vault / "wiki" / "topics" / "alpha.md"
+        alpha.write_text("---\ntitle: Alpha\n---\n\n" + ("y" * 3000) + "\n", encoding="utf-8")
+        report = idx.reindex_page(alpha)
+        assert report.pages_skipped == 1
+        assert report.skipped[0].path == alpha
+        # Stale alpha chunks must have been dropped.
+        assert idx.vec.get_checksums("alpha") == {}
     finally:
         idx.close()
 

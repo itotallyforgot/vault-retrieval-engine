@@ -26,6 +26,19 @@ class SlugCollisionError(RuntimeError):
 
 
 @dataclass
+class SkippedPage:
+    """A markdown file ``iter_pages`` could not turn into a :class:`Page`.
+
+    Surfaced (not swallowed) so the indexer can log a warning per skip and
+    expose a count in the index report / status output. ``reason`` is a short
+    human-readable cause, e.g. ``"page too large: ... (12345678 bytes > ...)"``.
+    """
+
+    path: Path
+    reason: str
+
+
+@dataclass
 class Page:
     path: Path  # absolute path on disk
     slug: str  # filename stem
@@ -127,12 +140,23 @@ def parse_wikilinks(body: str) -> list[str]:
     return out
 
 
-def iter_pages(vault_path: Path) -> list[Page]:
+def iter_pages(vault_path: Path, skipped: list[SkippedPage] | None = None) -> list[Page]:
     """Walk the vault for markdown pages and read each.
 
     Includes wiki/topics/, wiki/sources/, raw/. Skips _ops/, _templates/,
     skills/, and dotfile directories. Populates Page.wikilinks for every
     page. Skips symlinks pointing outside the vault root.
+
+    Args:
+        vault_path: Vault root to walk.
+        skipped: Optional list. When provided, every markdown file that
+            :func:`read_page` rejects (oversize / unreadable, raised as
+            ``ValueError``) is appended as a :class:`SkippedPage` instead of
+            being silently dropped. The indexer passes a list here so it can
+            log a warning per skip and report the count; other callers can
+            omit it and keep the plain ``list[Page]`` behaviour. Symlinks that
+            escape the vault root are excluded by design (a security filter,
+            not a read failure) and are not reported here.
 
     Raises:
         SlugCollisionError: two pages in the vault share the same stem
@@ -154,10 +178,12 @@ def iter_pages(vault_path: Path) -> list[Page]:
             continue
         try:
             page = read_page(md_path)
-        except ValueError:
+        except ValueError as e:
             # Oversize or otherwise unreadable: skip with no rebuild crash.
-            # The size cap is enforced inside read_page; surface via logging
-            # at the indexer layer rather than aborting iter_pages.
+            # The size cap is enforced inside read_page. Record the skip so
+            # the indexer can log + count it rather than dropping it silently.
+            if skipped is not None:
+                skipped.append(SkippedPage(path=md_path, reason=str(e)))
             continue
         if page.slug in seen_slugs:
             other = seen_slugs[page.slug]
