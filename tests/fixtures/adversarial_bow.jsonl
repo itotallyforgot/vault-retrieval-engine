@@ -1,0 +1,16 @@
+{"id": "neg-deploy-safe", "klass": "negation", "a": "the deploy is safe", "b": "the deploy is not safe"}
+{"id": "neg-deploy-succeeded", "klass": "negation", "a": "the deploy succeeded", "b": "the deploy did not succeed"}
+{"id": "neg-cert-valid", "klass": "negation", "a": "the certificate is valid", "b": "the certificate is not valid"}
+{"id": "neg-access-granted", "klass": "negation", "a": "access was granted", "b": "access was never granted"}
+{"id": "neg-service-reachable", "klass": "negation", "a": "the service is reachable", "b": "the service is unreachable"}
+{"id": "neg-patch-fixed", "klass": "negation", "a": "the patch fixed the bug", "b": "the patch did not fix the bug"}
+{"id": "swap-cat-dog", "klass": "word_swap", "a": "the cat chased the dog", "b": "the dog chased the cat"}
+{"id": "swap-alice-bob", "klass": "word_swap", "a": "alice reviews bob", "b": "bob reviews alice"}
+{"id": "swap-client-server", "klass": "word_swap", "a": "the client calls the server", "b": "the server calls the client"}
+{"id": "swap-parent-child", "klass": "word_swap", "a": "the parent supervises the child", "b": "the child supervises the parent"}
+{"id": "swap-firewall-attacker", "klass": "word_swap", "a": "the firewall blocks the attacker", "b": "the attacker blocks the firewall"}
+{"id": "swap-manager-analyst", "klass": "word_swap", "a": "the manager approves the analyst", "b": "the analyst approves the manager"}
+{"id": "shuffle-encrypt-send", "klass": "shuffle", "a": "encrypt the data before you send it", "b": "send the data before you encrypt it"}
+{"id": "shuffle-config-server", "klass": "shuffle", "a": "read the config then start the server", "b": "start the server then read the config"}
+{"id": "shuffle-key-breach", "klass": "shuffle", "a": "rotate the key after the breach", "b": "breach the key after the rotate"}
+{"id": "shuffle-commit-test", "klass": "shuffle", "a": "commit the code then run the tests", "b": "run the code then commit the tests"}
