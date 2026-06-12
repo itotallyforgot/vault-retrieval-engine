@@ -15,7 +15,17 @@ import networkx as nx
 from vault_engine.community import annotate_graph_with_communities
 from vault_engine.vault_reader import Page, build_alias_map
 
-ALLOWED_EDGE_TYPES: frozenset[str] = frozenset({"EXTRACTED", "INFERRED", "AMBIGUOUS"})
+ALLOWED_EDGE_TYPES: frozenset[str] = frozenset(
+    {"EXTRACTED", "INFERRED", "AMBIGUOUS", "DECISION_TRACE"}
+)
+
+# Node ``kind`` for decision-trace prototype nodes (gated by
+# ``EngineConfig.decision_trace_enabled``). A decision-trace node records a
+# conclusion + the reasoning hops behind it; DECISION_TRACE edges chain them so a
+# structural walk can answer "why was X concluded?" instead of returning semantic
+# neighbors. See [[2026-06-06-decision-traces-context-graphs-neo4j]].
+DECISION_TRACE_KIND: str = "decision-trace"
+DECISION_TRACE_EDGE: str = "DECISION_TRACE"
 
 
 class GraphStore:
@@ -144,6 +154,67 @@ class GraphStore:
                         continue
                     queue.append([*path, neighbor])
         return paths
+
+    def add_decision_trace(
+        self,
+        slug: str,
+        *,
+        conclusion: str,
+        because: list[str] | None = None,
+        **attrs: object,
+    ) -> None:
+        """Add a decision-trace node and chain it to its reasoning predecessors.
+
+        Prototype helper (gated by ``EngineConfig.decision_trace_enabled`` at the
+        call site). Creates a ``kind=DECISION_TRACE_KIND`` node carrying the
+        ``conclusion`` text, then draws a ``DECISION_TRACE`` edge from each slug
+        in ``because`` into this node — modeling "this conclusion follows from
+        those prior steps". Predecessor nodes are created on demand so a trace can
+        be stitched incrementally.
+        """
+        self.graph.add_node(
+            slug,
+            kind=DECISION_TRACE_KIND,
+            conclusion=conclusion,
+            **attrs,
+        )
+        for src in because or []:
+            if not self.graph.has_node(src):
+                self.graph.add_node(src, kind=DECISION_TRACE_KIND)
+            self.add_edge(src, slug, relation="because", edge_type=DECISION_TRACE_EDGE)
+
+    def decision_trace_walk(self, seed: str, max_depth: int = 10) -> list[str]:
+        """Walk DECISION_TRACE edges *backwards* from a conclusion to its roots.
+
+        Answers "why was ``seed`` concluded?" by following reasoning edges in
+        reverse (conclusion -> the steps it depends on), newest-first. Only edges
+        whose ``edge_type`` is ``DECISION_TRACE`` are traversed; EXTRACTED /
+        INFERRED wikilink edges are ignored, so the path is the reasoning chain,
+        not the semantic neighborhood.
+
+        Returns the ordered list of node slugs on the path starting at ``seed``
+        (inclusive). A seed with no inbound DECISION_TRACE edge yields ``[seed]``.
+        A missing seed yields ``[]``. Cycles and ``max_depth`` both bound the walk.
+        """
+        if not self.graph.has_node(seed):
+            return []
+        path: list[str] = [seed]
+        seen: set[str] = {seed}
+        current = seed
+        for _ in range(max_depth):
+            predecessors = [
+                src
+                for src in self.graph.predecessors(current)
+                if self.graph.edges[src, current].get("edge_type") == DECISION_TRACE_EDGE
+                and src not in seen
+            ]
+            if not predecessors:
+                break
+            nxt = predecessors[0]
+            path.append(nxt)
+            seen.add(nxt)
+            current = nxt
+        return path
 
     def orphans(self) -> Iterable[str]:
         """Nodes with zero in-degree (no inbound wikilinks)."""

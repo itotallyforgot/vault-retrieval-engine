@@ -66,6 +66,53 @@ _ENTITY_PAIR_CONNECTORS = {"and", "or", "to"}
 # Heuristic length threshold for "hybrid" (semantic + graph) tier.
 _HYBRID_TOKEN_THRESHOLD = 8
 
+# Negation markers. Sentence embeddings are bag-of-words dominated: "X is safe"
+# and "X is not safe" sit at near-identical cosine (see
+# [[2026-06-06-bag-of-words-breaks-modern-embeddings]]). When a query negates,
+# pure SEMANTIC nearest-neighbor cannot be trusted to honor the flip, so we
+# de-rate it to HYBRID and let the lexical leg disambiguate. Whole-word markers
+# plus the "n't" contraction suffix.
+_NEGATION_WORDS = {
+    "not",
+    "no",
+    "never",
+    "none",
+    "without",
+    "cannot",
+    "nor",
+    "neither",
+    "lacks",
+    "lacking",
+    "absent",
+}
+
+_NEGATION_RE = re.compile(
+    r"\b(" + "|".join(re.escape(w) for w in sorted(_NEGATION_WORDS)) + r")\b|n't\b",
+    re.IGNORECASE,
+)
+
+
+def contains_negation(query: str) -> bool:
+    """True if the query carries a negation marker (word or ``n't`` contraction).
+
+    Deliberately lexical and inspectable — an auditable router rule beats
+    trusting the embedding to have understood "not".
+    """
+    return bool(_NEGATION_RE.search(query))
+
+
+def derate_for_negation(mode: QueryMode, query: str) -> QueryMode:
+    """De-rate cosine confidence on negation: SEMANTIC -> HYBRID.
+
+    Only pure SEMANTIC is rerouted — it is the mode that leans entirely on the
+    embedding's nearest-neighbor cosine, which is exactly the signal a negation
+    corrupts. LOOKUP / MULTI_HOP / HYBRID already carry a lexical or structural
+    leg, so they are left untouched.
+    """
+    if mode is QueryMode.SEMANTIC and contains_negation(query):
+        return QueryMode.HYBRID
+    return mode
+
 
 def classify(query: str, known_titles: set[str]) -> QueryMode:
     """Classify query into LOOKUP / SEMANTIC / MULTI_HOP / HYBRID.
@@ -100,7 +147,9 @@ def classify(query: str, known_titles: set[str]) -> QueryMode:
         return QueryMode.HYBRID
     if has_relation:
         return QueryMode.MULTI_HOP
-    return QueryMode.SEMANTIC
+    # Negation de-rate: a bare SEMANTIC query that negates is rerouted to HYBRID
+    # so the lexical leg can disambiguate the flipped claim.
+    return derate_for_negation(QueryMode.SEMANTIC, q)
 
 
 # ---------------------------------------------------------------------------
