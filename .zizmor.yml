@@ -1,6 +1,11 @@
 # zizmor config — Dependabot owns action version bumps.
+# unpinned-uses: first-party reusables (itotallyforgot/*) may be ref-pinned to
+# the floating @v1 paved-path tag (the .github repo is branch-protected); every
+# third-party action must be hash-pinned. Replaces a stale '*: any' policy that
+# current zizmor no longer honors.
 rules:
   unpinned-uses:
     config:
       policies:
-        "*": any
+        "itotallyforgot/*": ref-pin
+        "*": hash-pin
