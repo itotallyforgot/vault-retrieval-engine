@@ -5,8 +5,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  schedule:
-    - cron: "0 6 * * 1"
 
 permissions:
   contents: read
@@ -16,38 +14,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  scorecard:
-    # OSSF Scorecard's anonymous-checkout pattern fails on private repos.
-    # Skip until the repo flips public; the scheduled cron + push-to-main
-    # paths will then start producing scorecards.
-    if: ${{ !github.event.repository.private }}
-    runs-on: ubuntu-latest
+  # Central security baseline: harden-runner, gitleaks, zizmor, dependency-review
+  # (trufflehog opt-in, off). Emits the frozen aggregate check `security-passed`.
+  baseline:
     permissions:
+      contents: read
       security-events: write
-      id-token: write
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: ossf/scorecard-action@v2.4.3
-        with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: false
-
-  dependency-review:
-    # Requires GitHub Advanced Security (free on public repos, paid on private).
-    # Skips on private repos so the workflow stays green pre-public-flip.
-    if: github.event_name == 'pull_request' && !github.event.repository.private
-    runs-on: ubuntu-latest
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-        with:
-          persist-credentials: false
-      - uses: actions/dependency-review-action@v5
+    uses: itotallyforgot/.github/.github/workflows/security-baseline.yml@v1
+    secrets: inherit
