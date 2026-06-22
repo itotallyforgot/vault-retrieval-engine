@@ -23,6 +23,5 @@ jobs:
     # No `secrets: inherit`: the built-in GITHUB_TOKEN is auto-available inside
     # reusable workflows; the reusable's gitleaks step reads it from its own
     # secrets context. Inheriting all secrets would be needlessly broad.
-    # TEMP (verification only — revert to @v1): point at the zizmor-fix branch
-    # so the fixed reusable runs. ci.yml below keeps @v1 as the real tag test.
-    uses: itotallyforgot/.github/.github/workflows/security-baseline.yml@fix/zizmor-firstparty-unpinned-uses
+    # verify: confirm the moved @v1 tag now carries the zizmor unpinned-uses fix
+    uses: itotallyforgot/.github/.github/workflows/security-baseline.yml@v1
