@@ -286,8 +286,11 @@ def _title_from_url(url: str) -> str:
 
 def _fallback_text_only(html: str) -> str:
     """Strip tags very crudely. Only used when trafilatura returns nothing."""
-    text = re.sub(r"<script[\s\S]*?</script\s*>", " ", html, flags=re.IGNORECASE)
-    text = re.sub(r"<style[\s\S]*?</style\s*>", " ", text, flags=re.IGNORECASE)
+    # End-tag match is `[^>]*` (not `\s*`): browsers treat trailing junk in an
+    # end tag (e.g. `</script bar>`) as closing the element, so the filter must
+    # too. (CodeQL py/bad-tag-filter.)
+    text = re.sub(r"<script[\s\S]*?</script[^>]*>", " ", html, flags=re.IGNORECASE)
+    text = re.sub(r"<style[\s\S]*?</style[^>]*>", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
