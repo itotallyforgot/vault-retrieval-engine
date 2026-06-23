@@ -1,0 +1,42 @@
+name: dependabot-sweep
+# Serverless daily auto-merge: enable auto-merge on every open Dependabot PR so
+# each merges the moment its required checks pass. Uses the `schedule` trigger
+# (not `pull_request`) so GITHUB_TOKEN is writable -- Dependabot-triggered runs
+# get a read-only token. No third-party actions => zizmor-clean.
+#
+# Install (per repo) AFTER: gh auth refresh -s workflow
+#   commit this to .github/workflows/dependabot-sweep.yml via a PR.
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge on open Dependabot PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prs=$(gh pr list -R "$REPO" --author 'app/dependabot' --state open --json number --jq '.[].number')
+          if [ -z "$prs" ]; then echo "No open Dependabot PRs."; exit 0; fi
+          for pr in $prs; do
+            echo "::group::PR #$pr"
+            # Gated repos: enable auto-merge (waits for green). Ungated repos:
+            # --auto is rejected, so fall back to an immediate merge.
+            gh pr merge --auto --merge "$pr" -R "$REPO" \
+              || gh pr merge --merge "$pr" -R "$REPO" \
+              || echo "could not merge #$pr"
+            echo "::endgroup::"
+          done
