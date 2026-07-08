@@ -16,6 +16,9 @@ permissions:
 jobs:
   # Standard lint (ruff) + typecheck (pyright) + test (pytest) come from the
   # central paved path. Emits the frozen aggregate check `ci-passed`.
+  # NOTE: jobs.<job_id>.uses (reusable workflow call) does not support
+  # timeout-minutes -- that key belongs to the internal lint/typecheck/test
+  # jobs defined in itotallyforgot/.github, out of this repo's reach.
   ci:
     permissions:
       contents: read
@@ -23,10 +26,15 @@ jobs:
     uses: itotallyforgot/.github/.github/workflows/ci-python-uv.yml@v1
     with:
       working-directory: .
+      # Measured baseline (uv run pytest --cov --cov-report=term-missing): 92%
+      # total (3986 stmts, 313 missed). Floor set just below that so real
+      # regressions fail the build without pinning to the exact number.
+      cov-floor: 91
 
   # Repo-specific: shell smoke harnesses. The paved path does not cover these.
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -49,9 +57,12 @@ jobs:
 
   # Repo-specific: retrieval eval against the mock embedder + sample vault,
   # plus the bag-of-words adversarial regression gate. Not covered by the paved path.
+  # Runs in parallel with `ci` (no `needs:`) instead of serialized behind it --
+  # it doesn't consume any artifact from that job, so serializing only added
+  # wall-clock time for no benefit.
   eval-rig-mock:
     runs-on: ubuntu-latest
-    needs: ci
+    timeout-minutes: 20
     permissions:
       contents: read
     steps:
@@ -61,10 +72,15 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-      - name: Install uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Set up uv
+        uses: astral-sh/setup-uv@f98e06938123ccabd21905ea5d0069192241f9f1 # v8.3.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      # --locked: fail loudly on lockfile drift instead of silently
+      # resolving an unlocked environment.
       - name: Sync deps
-        run: uv sync --group dev
+        run: uv sync --locked --group dev
       - name: Run eval against mock embedder + sample vault
         run: |
           uv run vault-engine --vault tests/fixtures/sample_vault eval \
