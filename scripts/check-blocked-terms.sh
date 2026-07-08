@@ -10,22 +10,23 @@
 
 set -euo pipefail
 
-BLOCKED_TERMS=(
-  # NDA-protected client work
-  "REDACTED"
-  "REDACTED"
-  # Current employer
-  "REDACTED"
-  # Federal client lineage (sensitive contexts)
-  "REDACTED"
-  "REDACTED"
-  "REDACTED"
-  "REDACTED"
-)
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PERSONAL_PATTERNS_FILE="$SCRIPT_DIR/blocked-terms-personal.txt"
+LITERALS_FILE="$SCRIPT_DIR/blocked-terms-literals.txt"
 SELF_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+
+# Literal blocked terms (NDA client names, employer-internal terms, federal
+# client names) live in blocked-terms-literals.txt, which is gitignored so the
+# terms themselves never enter the repo. One term per line; blank lines and
+# lines beginning with # are ignored. If the file is absent (e.g. a fresh
+# checkout), only the personal-pattern checks below run.
+BLOCKED_TERMS=()
+if [ -f "$LITERALS_FILE" ]; then
+  while IFS= read -r term; do
+    [[ -z "$term" || "$term" =~ ^[[:space:]]*# ]] && continue
+    BLOCKED_TERMS+=("$term")
+  done < "$LITERALS_FILE"
+fi
 
 found_match=0
 
