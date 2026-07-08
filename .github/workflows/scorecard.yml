@@ -23,6 +23,7 @@ jobs:
   analysis:
     name: scorecard-analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       security-events: write # upload SARIF to code scanning
       id-token: write # publish results to the public scorecard API
