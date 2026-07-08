@@ -5,16 +5,24 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCANNER="$ROOT_DIR/scripts/check-blocked-terms.sh"
 PERSONAL_PATTERNS_FILE="$ROOT_DIR/scripts/blocked-terms-personal.txt"
+LITERALS_FILE="$ROOT_DIR/scripts/blocked-terms-literals.txt"
 
 tmpdir="$(mktemp -d)"
 backup_personal="$tmpdir/blocked-terms-personal.txt.backup"
+backup_literals="$tmpdir/blocked-terms-literals.txt.backup"
 had_personal=0
+had_literals=0
 
 cleanup() {
   if [ "$had_personal" -eq 1 ]; then
     cp "$backup_personal" "$PERSONAL_PATTERNS_FILE"
   else
     rm -f "$PERSONAL_PATTERNS_FILE"
+  fi
+  if [ "$had_literals" -eq 1 ]; then
+    cp "$backup_literals" "$LITERALS_FILE"
+  else
+    rm -f "$LITERALS_FILE"
   fi
   rm -rf "$tmpdir"
 }
@@ -23,6 +31,18 @@ trap cleanup EXIT
 if [ -f "$PERSONAL_PATTERNS_FILE" ]; then
   had_personal=1
   cp "$PERSONAL_PATTERNS_FILE" "$backup_personal"
+fi
+
+# LITERALS_FILE is gitignored (scripts/blocked-terms-literals.txt), so a fresh
+# CI checkout never has it — the scanner then runs with an empty BLOCKED_TERMS
+# list and the literal-term assertions below would always report an
+# unexpected pass. Seed a throwaway literals file with this smoke test's own
+# fixture terms (backing up/restoring any local developer file exactly like
+# PERSONAL_PATTERNS_FILE above), so the literal-term coverage is self-contained
+# and doesn't depend on the contents of a file that's never present in CI.
+if [ -f "$LITERALS_FILE" ]; then
+  had_literals=1
+  cp "$LITERALS_FILE" "$backup_literals"
 fi
 
 assert_pass() {
@@ -72,6 +92,8 @@ printf 'This line mentions %s as a standalone sensitive term.\n' "$employer_term
 printf 'Call the private line at %s.\n' "$personal_value" > "$personal_info_file"
 
 printf '%s\n' "$personal_pattern" > "$PERSONAL_PATTERNS_FILE"
+
+printf '%s\n%s\n' "$blocked_term" "$employer_term" > "$LITERALS_FILE"
 
 assert_pass "blocked-term substrings are allowed" "$false_positive_file"
 assert_pass "scanner can scan its own blocked-term definitions" "$SCANNER"

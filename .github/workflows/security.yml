@@ -16,6 +16,9 @@ concurrency:
 jobs:
   # Central security baseline: harden-runner, gitleaks, zizmor, dependency-review
   # (trufflehog opt-in, off). Emits the frozen aggregate check `security-passed`.
+  # NOTE: a job that calls a reusable workflow via `uses:` cannot also declare
+  # timeout-minutes (not a supported key on that job shape) -- the internal
+  # jobs live in itotallyforgot/.github, out of this repo's reach.
   baseline:
     permissions:
       contents: read

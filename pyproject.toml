@@ -58,6 +58,13 @@ markers = [
     "integration: requires real embedding model and GPU",
 ]
 
+# The paved-path `test` job runs `pytest --cov --cov-fail-under=<floor>` with
+# no explicit --cov-report; show_missing makes the resulting default terminal
+# report include missing line numbers (equivalent to --cov-report=term-missing)
+# without needing to touch that command in the central reusable workflow.
+[tool.coverage.report]
+show_missing = true
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"

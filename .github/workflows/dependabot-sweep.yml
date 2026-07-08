@@ -22,6 +22,7 @@ concurrency:
 jobs:
   sweep:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Enable auto-merge on open Dependabot PRs
         env:
