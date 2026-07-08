@@ -12,8 +12,7 @@ deserve user attention. Outputs land as draft files under
 `notes/` for the user to review, promote, or discard.
 
 **When to run:** On demand by the user. Manual trigger only in MVP;
-scheduled automation is deferred to Phase 1.5 (see
-`internal-notes`).
+scheduled automation is deferred to a later phase.
 
 **Inputs:** None required. Optional argument: `--since <ISO-date>` to
 restrict the activity window (default: last 7 days). Optional:
@@ -158,7 +157,7 @@ After the run, all of the following must hold:
 
 ## Reference
 
-- Spec: `internal-notes`
-- Plan: `internal-notes` (Slice 3)
+- Spec and plan: tracked in the vault owner's internal planning notes
+  (not included in this repo).
 - Output convention: `notes/README.md`
 - Vault structure: `vault_map.md`

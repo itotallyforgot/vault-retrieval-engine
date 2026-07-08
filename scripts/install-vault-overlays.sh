@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install-vault-overlays.sh — drop engine plug-in overlays into a target vault.
 #
-# Designed for markdown-vault-template-shaped vaults. Idempotent: re-running
+# Designed for markdown/Obsidian-style vaults. Idempotent: re-running
 # is safe and reports what's already in place vs newly installed.
 #
 # Usage:
@@ -16,7 +16,7 @@
 #   - .githooks/post-commit.d/10-vault-engine.sh     — engine's reindex piece
 #
 # Pre-requisites for full function (skills are scaffolding either way):
-#   - Vault has a 'skills/vault/' bundle conforming to the markdown-vault pattern.
+#   - Vault has a 'skills/vault/' bundle conforming to this layout convention.
 #   - Vault is git-tracked (.git/ exists) for the post-commit hook to fire.
 #   - vault-engine is on PATH for the engine plug-in to do its job;
 #     the plug-in is a graceful no-op when not.

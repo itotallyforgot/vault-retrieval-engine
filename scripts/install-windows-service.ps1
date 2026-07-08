@@ -11,7 +11,7 @@
       - A useful description visible in `services.msc`
 
 .PARAMETER VaultPath
-    Absolute path to the markdown-vault vault root (the directory containing
+    Absolute path to the vault root (the directory containing
     `wiki/`, `raw/`, etc.). Required.
 
 .PARAMETER ServiceName
@@ -30,8 +30,8 @@
     account — `LocalSystem`'s `%APPDATA%` is
     `C:\Windows\System32\config\systemprofile\AppData\Roaming`, which is
     not the same cache your interactive shell uses. Without this param the
-    service does a cold rebuild on first start. A shared E:\ path
-    (e.g. `/path/to/cache`) avoids that.
+    service does a cold rebuild on first start. A shared path outside
+    either profile (e.g. `C:\path\to\cache`) avoids that.
 
 .PARAMETER VaultEngineExe
     Full path to `vault-engine.exe`. Auto-detected from PATH if omitted.
@@ -43,7 +43,7 @@
 .PARAMETER BindAddr
     HTTP bind interface. Wired into the service via NSSM
     `AppEnvironmentExtra` as `VAULT_ENGINE_BIND_ADDR`, mirroring the
-    macOS launchd plist (ISSUE-N). Defaults to `127.0.0.1` (loopback).
+    macOS launchd plist. Defaults to `127.0.0.1` (loopback).
     Pass the Tailscale IP to expose over the tailnet.
 
 .PARAMETER HttpPort
@@ -63,11 +63,11 @@
 
 .EXAMPLE
     # Preview, no elevation required:
-    .\install-windows-service.ps1 -VaultPath /path/to/vault -DryRun
+    .\install-windows-service.ps1 -VaultPath C:\path\to\your-vault -DryRun
 
 .EXAMPLE
     # Real install (run from an elevated PowerShell):
-    .\install-windows-service.ps1 -VaultPath /path/to/vault
+    .\install-windows-service.ps1 -VaultPath C:\path\to\your-vault
 
 .NOTES
     Service registration touches the SCM and requires Administrator. The

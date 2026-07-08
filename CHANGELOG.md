@@ -5,7 +5,7 @@ format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project follows [Semantic Versioning](https://semver.org/).
 
 Versions in `Unreleased` may still slip; the actively-tracked roadmap
-lives at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N).
+lives in the v0.2.0 hardening epic (tracked in an internal issue tracker).
 
 ## [Unreleased]
 
@@ -13,7 +13,7 @@ lives at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N).
 - `overlays/githooks/post-commit` — vault-owned dispatcher pattern that
   walks `post-commit.d/*` in lexical order. Plug-ins drop their own
   `<NN>-<plugin>.sh`; engine claims `10-` so future plug-ins can sequence
-  around it. ([slice 1 of standalone-refactor], #13)
+  around it. (slice 1 of the standalone-refactor work, #13)
 - `overlays/githooks/post-commit.d/10-vault-engine.sh` — engine's reindex
   piece, extracted from the legacy monolithic hook. (#13)
 - `tests/smoke_install_vault_overlays_dispatcher.sh` — bash smoke harness
@@ -26,7 +26,7 @@ lives at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N).
 - README "Install onto your vault" section above the fold; opens with
   the canonical 3-step `install-vault-overlays.sh` flow. Top-of-README
   callout explicitly frames the engine as a plug-in for
-  markdown-vault-template-shaped vaults. (#14)
+  markdown/Obsidian-style vaults. (#14)
 
 ### Changed
 - `scripts/install-vault-overlays.sh` now installs the dispatcher only
@@ -38,8 +38,6 @@ lives at the [v0.2.0 hardening epic](https://example.com/tracker/issue/ISSUE-N).
 - `actions/checkout` 4 → 6 (#12)
 - `actions/setup-python` 5 → 6 (#11)
 - `ossf/scorecard-action` 2.4.1 → 2.4.3 (#10)
-
-[slice 1 of standalone-refactor]: https://example.com/tracker/issue/ISSUE-N
 
 ## [0.1.0] — 2026-05-04
 
@@ -93,8 +91,8 @@ auditable retrieval, eval harness with latency SLOs.
 ### Known issues
 Honestly tracked in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md). v0.2.0 will
 land slug-schema migration, the Service-CLI refactor, full GraphQuery
-facade, and observability polish. See
-[ISSUE-N](https://example.com/tracker/issue/ISSUE-N) for the epic.
+facade, and observability polish. See the v0.2.0 hardening epic
+(tracked in an internal issue tracker) for the full scope.
 
 [Unreleased]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/itotallyforgot/vault-retrieval-engine/releases/tag/v0.1.0

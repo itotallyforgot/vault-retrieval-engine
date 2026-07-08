@@ -1,6 +1,6 @@
 """Decision-trace node type (prototype, gated by ``decision_trace_enabled``).
 
-Deliverable 2 of ISSUE-N. Two halves:
+Part of an internal tracking issue for graph-reasoning traceability. Two halves:
 
 - **Flag-on path:** a decision-trace node can be added, chained via DECISION_TRACE
   edges, and a structural hop walks the reasoning chain ("why was X concluded?").

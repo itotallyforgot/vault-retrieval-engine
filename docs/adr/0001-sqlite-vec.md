@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-05-04
-**Decision-maker:** the maintainer (project owner)
+**Decision-maker:** project owner
 
 ## Context
 

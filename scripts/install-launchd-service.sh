@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install-launchd-service.sh — register vault-retrieval-engine as a macOS
-# LaunchAgent (ISSUE-N, Mac counterpart to install-windows-service.ps1).
+# LaunchAgent (Mac counterpart to install-windows-service.ps1).
 #
 # What this script does:
 #   1. Render overlays/launchd/com.vault-retrieval.engine.plist by
