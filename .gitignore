@@ -24,6 +24,7 @@ Thumbs.db
 
 # Personal-info patterns (consumed by scripts/check-blocked-terms.sh)
 scripts/blocked-terms-personal.txt
+scripts/blocked-terms-literals.txt
 
 # Worktrees (used by ogre:execute)
 .worktrees/
