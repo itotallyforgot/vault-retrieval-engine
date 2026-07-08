@@ -2,7 +2,7 @@
 
 Local semantic retrieval engine over personal markdown vaults. No external API. Citation chains for auditable retrieval.
 
-A plug-in for second-brain-template-shaped vaults — overlays retrieval, semantic search, and citation chains onto a vault that runs standalone without it. Works with any markdown vault that uses wikilinks; the vault remains the source of truth and the engine is best-effort enrichment.
+A plug-in for markdown/Obsidian-style vaults — overlays retrieval, semantic search, and citation chains onto a vault that runs standalone without it. Works with any markdown vault that uses wikilinks; the vault remains the source of truth and the engine is best-effort enrichment.
 
 ## Why
 
@@ -108,7 +108,7 @@ After indexing, the engine can run as a long-lived service with two transport su
 ### MCP stdio (Claude Code, Codex, Cursor)
 
 ```bash
-uv run vault-engine mcp --vault ~/Projects/Second-Brain
+uv run vault-engine mcp --vault ~/Projects/your-vault
 ```
 
 Tool surface:
@@ -131,7 +131,7 @@ Tool surface:
 ```bash
 # Tailscale up, 100.x.y.z address assigned.
 # Bind/port/token come from EngineConfig (loopback by default).
-uv run vault-engine serve --vault ~/Projects/Second-Brain
+uv run vault-engine serve --vault ~/Projects/your-vault
 ```
 
 Bind to the tailnet IP and require a token via `EngineConfig` (`http_bind_addr`, `http_port`, `http_token`) or env vars (`VAULT_ENGINE_BIND_ADDR`, `VAULT_ENGINE_HTTP_PORT`, `VAULT_ENGINE_HTTP_TOKEN`, `VAULT_ENGINE_CACHE_DIR`). Env-var precedence is `env-var > function-arg > dataclass-default`; the launchd plist and NSSM service both rely on this so the install scripts can fully configure the engine without a TOML file.
@@ -139,7 +139,7 @@ Bind to the tailnet IP and require a token via `EngineConfig` (`http_bind_addr`,
 For long-lived service mode see `docs/windows-service.md` (PC, NSSM) and the new macOS path:
 
 ```bash
-./scripts/install-launchd-service.sh --vault ~/Projects/Second-Brain \
+./scripts/install-launchd-service.sh --vault ~/Projects/your-vault \
     --bind <tailnet-ip-or-127.0.0.1> --token <bearer-secret>
 ```
 
@@ -161,7 +161,7 @@ Use as `Authorization: Bearer <token>` for `POST /query` and `GET /graph/stats`.
 ### Vault-side hook
 
 ```bash
-uv run vault-engine hook install --vault ~/Projects/Second-Brain
+uv run vault-engine hook install --vault ~/Projects/your-vault
 ```
 
 Installs a hint that nudges Claude Code Glob/Grep calls inside the vault toward `/vault query` first. The installer is idempotent and per-OS (`.sh` on macOS/Linux, `.ps1` on Windows).
@@ -224,7 +224,7 @@ If the engine is uninstalled, crashed, or unreachable, no vault content is lost.
 
 ## Plug-in pattern
 
-The second-brain template runs standalone. Integrations between vault and engine are designed as overlays installed from this repo, not as plumbing inside the vault:
+The vault runs standalone. Integrations between vault and engine are designed as overlays installed from this repo, not as plumbing inside the vault:
 
 - **`vault-engine hook install --vault <path>`** — installs Claude Code Glob/Grep hint that prefers `/vault query` (idempotent, per-OS).
 - **`scripts/install-windows-service.ps1`** — registers an NSSM service for engine HTTP/MCP on PC. Wires `VAULT_ENGINE_BIND_ADDR`, `VAULT_ENGINE_HTTP_PORT`, and `VAULT_ENGINE_HTTP_TOKEN` into the service environment via NSSM's `AppEnvironmentExtra`.
@@ -322,4 +322,4 @@ Apache License 2.0. See [LICENSE](LICENSE).
 
 **v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 5 ADRs. Current local collection: 146 tests. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
 
-**Current status**: post-v0.1.0 hardening is tracked at the [v0.2.0 hardening epic](https://linear.app/ogre-labs/issue/OGR-19). Recent work has landed in `main`; see the `Unreleased` section of [`CHANGELOG.md`](./CHANGELOG.md) for shipped slices and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for deferred items.
+**Current status**: post-v0.1.0 hardening is tracked as the v0.2.0 hardening epic (tracked in an internal issue tracker). Recent work has landed in `main`; see the `Unreleased` section of [`CHANGELOG.md`](./CHANGELOG.md) for shipped slices and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for deferred items.

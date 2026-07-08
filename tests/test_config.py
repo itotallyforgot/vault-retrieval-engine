@@ -49,11 +49,11 @@ def test_config_p2_explicit_tailnet(tmp_path: Path):
     vault.mkdir()
     cfg = EngineConfig(
         vault_path=vault,
-        http_bind_addr="100.64.0.5",  # tailnet IP
+        http_bind_addr="100.64.0.0",  # tailnet IP
         http_port=7842,
         http_token="dev-token",
         mcp_enabled=True,
     )
-    assert cfg.http_bind_addr == "100.64.0.5"
+    assert cfg.http_bind_addr == "100.64.0.0"
     assert cfg.http_token == "dev-token"
     assert cfg.mcp_enabled is True

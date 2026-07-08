@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # uninstall-launchd-service.sh — stop and remove the vault-retrieval-engine
-# LaunchAgent on macOS (OGR-181, counterpart to uninstall-windows-service.ps1).
+# LaunchAgent on macOS (counterpart to uninstall-windows-service.ps1).
 #
 # Idempotent: safe to run when the agent is not loaded.
 #

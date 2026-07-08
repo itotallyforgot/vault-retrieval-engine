@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  launchd LaunchAgent template for vault-retrieval-engine (OGR-181).
+  launchd LaunchAgent template for vault-retrieval-engine.
 
   Counterpart to scripts/install-windows-service.ps1 (NSSM). The install
   script (scripts/install-launchd-service.sh) substitutes the __PLACEHOLDER__

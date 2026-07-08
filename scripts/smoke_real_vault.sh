@@ -2,7 +2,7 @@
 # Smoke test against the real vault. Runs on PC.
 set -euo pipefail
 
-VAULT="${VAULT:-$USERPROFILE/Projects/Second-Brain}"
+VAULT="${VAULT:-$USERPROFILE/Projects/your-vault}"
 FIXTURES="$VAULT/_ops/eval/retrieval-fixtures.jsonl"
 
 echo "[smoke] vault=$VAULT"

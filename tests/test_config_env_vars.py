@@ -1,4 +1,4 @@
-"""Env-var overrides for ``load_config`` (OGR-181).
+"""Env-var overrides for ``load_config``.
 
 The launchd plist (mac) and NSSM service (PC) both set ``VAULT_ENGINE_*``
 env vars so the same install scripts work across machines without
@@ -29,9 +29,9 @@ def vault(tmp_path: Path) -> Path:
 
 
 def test_env_var_overrides_bind_addr(monkeypatch: pytest.MonkeyPatch, vault: Path) -> None:
-    monkeypatch.setenv("VAULT_ENGINE_BIND_ADDR", "100.64.0.5")
+    monkeypatch.setenv("VAULT_ENGINE_BIND_ADDR", "100.64.0.0")
     cfg = load_config(vault_path=vault)
-    assert cfg.http_bind_addr == "100.64.0.5"
+    assert cfg.http_bind_addr == "100.64.0.0"
 
 
 def test_env_var_overrides_http_token(monkeypatch: pytest.MonkeyPatch, vault: Path) -> None:
@@ -85,10 +85,10 @@ def test_env_var_empty_string_treated_as_unset(
 
 
 def test_env_var_whitespace_is_stripped(monkeypatch: pytest.MonkeyPatch, vault: Path) -> None:
-    monkeypatch.setenv("VAULT_ENGINE_BIND_ADDR", "  100.64.0.5  ")
+    monkeypatch.setenv("VAULT_ENGINE_BIND_ADDR", "  100.64.0.0  ")
     monkeypatch.setenv("VAULT_ENGINE_HTTP_TOKEN", "\ttoken-with-tabs\n")
     cfg = load_config(vault_path=vault)
-    assert cfg.http_bind_addr == "100.64.0.5"
+    assert cfg.http_bind_addr == "100.64.0.0"
     assert cfg.http_token == "token-with-tabs"
 
 
@@ -124,12 +124,12 @@ def test_all_env_vars_together(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, vault: Path
 ) -> None:
     env_cache = tmp_path / "env-cache"
-    monkeypatch.setenv("VAULT_ENGINE_BIND_ADDR", "100.64.0.5")
+    monkeypatch.setenv("VAULT_ENGINE_BIND_ADDR", "100.64.0.0")
     monkeypatch.setenv("VAULT_ENGINE_HTTP_TOKEN", "service-token")
     monkeypatch.setenv("VAULT_ENGINE_HTTP_PORT", "8080")
     monkeypatch.setenv("VAULT_ENGINE_CACHE_DIR", str(env_cache))
     cfg = load_config(vault_path=vault)
-    assert cfg.http_bind_addr == "100.64.0.5"
+    assert cfg.http_bind_addr == "100.64.0.0"
     assert cfg.http_token == "service-token"
     assert cfg.http_port == 8080
     assert cfg.cache_dir == env_cache.resolve()

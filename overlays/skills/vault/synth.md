@@ -9,11 +9,10 @@ invoked_by: ["skills/vault/adapters/claude-code/vault.md"]
 **Purpose:** Surface candidate insights — themes, patterns, and
 connections that have crossed multiple sources or topic pages and
 deserve user attention. Outputs land as draft files under
-`wiki/insights/` for the user to review, promote, or discard.
+`notes/` for the user to review, promote, or discard.
 
 **When to run:** On demand by the user. Manual trigger only in MVP;
-scheduled automation is deferred to Phase 1.5 (see
-`_ops/2026-05-04-three-pillars-mvp.md`).
+scheduled automation is deferred to a later phase.
 
 **Inputs:** None required. Optional argument: `--since <ISO-date>` to
 restrict the activity window (default: last 7 days). Optional:
@@ -21,8 +20,8 @@ restrict the activity window (default: last 7 days). Optional:
 
 ## Preconditions
 
-- `wiki/insights/` directory exists (per `vault_map.md` and
-  `wiki/insights/README.md`).
+- `notes/` directory exists (per `vault_map.md` and
+  `notes/README.md`).
 - `vault-engine` is installed and its MCP server is available — the
   procedure calls the `query_graph` tool. If the engine is missing or
   unreachable, surface the gap and stop.
@@ -70,7 +69,7 @@ clusters' outputs are already on disk and committable independently.
       using the link-resolution normalization rule (case-insensitive,
       word-boundary, plural/morphology-tolerant — see `vault_map.md`).
    b. If a matching topic page exists → **DO NOT** write a new file
-      under `wiki/insights/`. Instead, choose one:
+      under `notes/`. Instead, choose one:
       - **Append** a `## Candidate insight (YYYY-MM-DD)` section to
         the existing topic page summarizing the cluster's claim and
         citing sources, OR
@@ -80,9 +79,9 @@ clusters' outputs are already on disk and committable independently.
         topic page already has a `## Synthesis` section maintained by
         lint (don't compete with lint).
    c. If no matching topic exists → proceed to step 8.
-8. **Write the draft.** Create `wiki/insights/YYYY-MM-DD-<slug>.md`
+8. **Write the draft.** Create `notes/YYYY-MM-DD-<slug>.md`
    with the frontmatter contract documented in
-   `wiki/insights/README.md`:
+   `notes/README.md`:
    ```yaml
    ---
    title: "..."
@@ -112,8 +111,8 @@ clusters' outputs are already on disk and committable independently.
     ## [YYYY-MM-DD HH:MM] synth | run summary | drafted=A appended=B flagged=C skipped=D
     ```
 12. Print to the user: per-cluster outcomes (slug, action,
-    `wiki/insights/...` path or topic path), and a one-line next-step
-    suggestion: *"Review drafts under wiki/insights/. Promote with
+    `notes/...` path or topic path), and a one-line next-step
+    suggestion: *"Review drafts under notes/. Promote with
     /vault ingest semantics or discard."*
 
 ## Out of scope
@@ -134,9 +133,9 @@ clusters' outputs are already on disk and committable independently.
 
 After the run, all of the following must hold:
 
-- Every new file under `wiki/insights/` has valid frontmatter
-  matching the contract in `wiki/insights/README.md`.
-- No file under `wiki/insights/` duplicates an existing topic
+- Every new file under `notes/` has valid frontmatter
+  matching the contract in `notes/README.md`.
+- No file under `notes/` duplicates an existing topic
   (cross-check by computing the same conflict-detection rule from
   step 7 for every newly-written draft).
 - `wiki/log.md` contains per-cluster entries plus a final summary
@@ -158,7 +157,7 @@ After the run, all of the following must hold:
 
 ## Reference
 
-- Spec: `_ops/2026-05-04-three-pillars-mvp.md`
-- Plan: `_ops/2026-05-04-three-pillars-mvp-plan.md` (Slice 3)
-- Output convention: `wiki/insights/README.md`
+- Spec and plan: tracked in the vault owner's internal planning notes
+  (not included in this repo).
+- Output convention: `notes/README.md`
 - Vault structure: `vault_map.md`
