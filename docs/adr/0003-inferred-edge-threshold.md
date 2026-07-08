@@ -20,7 +20,7 @@ A cosine threshold gates which similarity scores qualify as edges. Too low: the 
 
 ## Calibration data
 
-Empirical run on a personal vault:
+Empirical run on a personal vault (mxbai-embed-large embedding, 1024-dim L2-normalized vectors):
 
 | Threshold | Edges added | Avg per node | Qualitative read |
 |---|---|---|---|
@@ -49,7 +49,7 @@ At 0.85 the top-confidence INFERRED edges are duplicate topic↔source bundles (
 
 ### Negative
 
-- **Vault-size-sensitive.** The 0.85 calibration is from a 339-page vault. Larger vaults may need recalibration. KNOWN_ISSUES.md tracks this.
+- **Vault-size-sensitive.** The 0.85 calibration is from a modest personal vault. Larger vaults may need recalibration. KNOWN_ISSUES.md tracks this.
 - **Embedding-model-coupled.** Cosine values are model-dependent. The default 0.85 is calibrated for mxbai-embed-large-v1. Users switching embedding models should re-evaluate.
 
 ## Status flags

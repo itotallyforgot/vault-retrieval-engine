@@ -1,4 +1,4 @@
-"""Env-var overrides for ``load_config`` (ISSUE-N).
+"""Env-var overrides for ``load_config``.
 
 The launchd plist (mac) and NSSM service (PC) both set ``VAULT_ENGINE_*``
 env vars so the same install scripts work across machines without

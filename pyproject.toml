@@ -1,7 +1,7 @@
 [project]
 name = "vault-engine"
 version = "0.1.0"
-description = "Local retrieval engine over the markdown-vault vault."
+description = "Local semantic retrieval engine over a markdown vault."
 requires-python = ">=3.12"
 dependencies = [
     "sentence-transformers>=5.6.0",

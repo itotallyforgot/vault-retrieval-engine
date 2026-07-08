@@ -2,7 +2,7 @@
 # demo-worktree-concurrency.sh
 #
 # Demonstrates the worktree-isolated concurrent agent execution policy
-# (Linear ISSUE-N, markdown-vault internal-notes).
+# described in the project's internal worktree-concurrency policy notes.
 #
 # Creates two scratch worktrees in a temp git repo, edits disjoint files
 # in each (simulating two implementation agents working in parallel),
@@ -95,4 +95,4 @@ git worktree remove .worktrees/demo-slice-a
 git worktree remove .worktrees/demo-slice-b
 git branch -D demo/slice-a demo/slice-b >/dev/null
 
-echo "PASS: two disjoint worktrees merged clean — ISSUE-N acceptance #2 satisfied."
+echo "PASS: two disjoint worktrees merged clean — worktree-concurrency acceptance criteria satisfied."

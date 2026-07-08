@@ -1,11 +1,12 @@
-# Querying vault-engine from iOS over Tailscale (ISSUE-N)
+# Querying vault-engine from iOS over Tailscale
 
 Once the engine is running as a persistent service on your Mac (or PC)
 and Tailscale is up on both that machine and your iPhone, an iOS
 Shortcut can hit `POST /query` and surface results in any context that
 accepts text: Share Sheet, Spotlight, voice via Siri, Lock Screen
-widget, Action Button. This is the "phone has a path to the brain"
-piece of the ISSUE-N bundle.
+widget, Action Button. This is the phone-to-engine piece of the
+service setup described in `docs/windows-service.md` and
+`scripts/install-launchd-service.sh`.
 
 ## Prerequisites
 

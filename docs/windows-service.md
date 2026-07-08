@@ -39,10 +39,10 @@ The HTTP port and bind address come from `EngineConfig` (default
 
 ```powershell
 # Preview without elevation:
-.\scripts\install-windows-service.ps1 -VaultPath /path/to/vault -DryRun
+.\scripts\install-windows-service.ps1 -VaultPath C:\path\to\your-vault -DryRun
 
 # Real install (elevated PowerShell):
-.\scripts\install-windows-service.ps1 -VaultPath /path/to/vault
+.\scripts\install-windows-service.ps1 -VaultPath C:\path\to\your-vault
 ```
 
 The script will:

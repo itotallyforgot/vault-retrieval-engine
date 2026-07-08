@@ -75,11 +75,11 @@ class EngineConfig:
     # edges are never overwritten regardless of threshold.
     #
     # Default is 0.85 based on empirical real-vault smoke (mxbai-embed-large,
-    # 339 pages): 0.80 emits 7058 edges (62% of which sit in [0.80, 0.83) and
-    # represent weak same-domain co-occurrence), 0.85 emits 1319 (avg 4/node),
-    # 0.90 emits 200 (high precision, low recall). 0.85 is the elbow where
-    # noise drops sharply but topical neighbors are still surfaced. mxbai
-    # vectors are L2-normalised so absolute scores skew high.
+    # personal-vault scale): 0.80 emits 7058 edges (62% of which sit in
+    # [0.80, 0.83) and represent weak same-domain co-occurrence), 0.85 emits
+    # 1319 (avg 4/node), 0.90 emits 200 (high precision, low recall). 0.85 is
+    # the elbow where noise drops sharply but topical neighbors are still
+    # surfaced. mxbai vectors are L2-normalised so absolute scores skew high.
     inferred_edge_threshold: float = 0.85
 
     # --- P2 additions ---

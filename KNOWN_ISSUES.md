@@ -13,7 +13,7 @@ The multi-axis review surfaced 12 P0 + 14 critical-P1 findings. As of v0.1.0 shi
 - **All documentation P0s fixed** — README CLI and eval-fixture schema match reality; sample vault expanded with multi-hop chains, alias chains, and an orphan; CI eval gate uses real expected_pages so it can fail.
 - **Performance P0s fixed** — graph walk replaced with bounded BFS, similarity-edge inference replaced with single-matmul, reindex_page does one disk walk instead of two.
 - **5 ADRs landed** — sqlite-vec, NetworkX, INFERRED threshold (0.85), router tiers, and default embedding model (mxbai-embed-large).
-- **Vault-overlay plug-in pattern landed** — engine-aware vault skills (synth, crawl) and the post-commit reindex hook moved out of the markdown-vault vault and into `overlays/` here, installable via `scripts/install-vault-overlays.sh`.
+- **Vault-overlay plug-in pattern landed** — engine-aware vault skills (synth, crawl) and the post-commit reindex hook moved out of the vault and into `overlays/` here, installable via `scripts/install-vault-overlays.sh`.
 
 ## What's deferred to v0.2.0
 

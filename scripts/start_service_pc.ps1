@@ -10,7 +10,7 @@ if ($LASTEXITCODE -ne 0) { exit 1 }
 
 # 2. Resolve vault path
 $vault = $env:VAULT
-if (-not $vault) { $vault = Join-Path $env:USERPROFILE "Projects\markdown-vault" }
+if (-not $vault) { $vault = Join-Path $env:USERPROFILE "Projects\your-vault" }
 if (-not (Test-Path $vault)) {
     Write-Error "Vault not found: $vault"
     exit 1
