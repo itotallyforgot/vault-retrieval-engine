@@ -11,9 +11,10 @@ on:
     - cron: "0 6 * * *"   # 06:00 UTC daily
   workflow_dispatch:
 
+# Least-privilege: the workflow defaults to read-only; the write scopes the
+# sweep job actually needs are granted at the job level below.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: dependabot-sweep-${{ github.ref }}
@@ -23,6 +24,10 @@ jobs:
   sweep:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # contents: write to merge PRs; pull-requests: write to enable auto-merge.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Enable auto-merge on open Dependabot PRs
         env:
