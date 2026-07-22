@@ -31,7 +31,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pyright>=1.1.411",
-    "ruff>=0.15.20",
+    "ruff>=0.15.21",
 ]
 
 [tool.uv]
