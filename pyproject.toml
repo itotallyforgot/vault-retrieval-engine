@@ -15,7 +15,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "rich>=15.0.0",
     "mcp>=1.28.1,<2.0",
-    "fastapi>=0.139.0,<1.0",
+    "fastapi>=0.139.2,<1.0",
     "uvicorn[standard]>=0.51.0,<1.0",
     "python-louvain>=0.16,<1.0",
     "pyjwt>=2.13.0,<3.0",
@@ -31,7 +31,7 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "pyright>=1.1.411",
-    "ruff>=0.15.21",
+    "ruff>=0.15.22",
 ]
 
 [tool.uv]
