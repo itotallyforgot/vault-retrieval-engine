@@ -23,7 +23,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: itotallyforgot/.github/.github/workflows/ci-python-uv.yml@375ab554153b5eb88b47c990c982a0fe205f92c4
+    uses: itotallyforgot/.github/.github/workflows/ci-python-uv.yml@048205fec59958441d12bfa6460426ec1f7f8729
     with:
       working-directory: .
       # Measured baseline (uv run pytest --cov --cov-report=term-missing): 92%
