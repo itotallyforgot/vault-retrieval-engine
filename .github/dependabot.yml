@@ -9,7 +9,10 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-  - package-ecosystem: "pip"
+  # uv-managed project: the "uv" ecosystem updates pyproject.toml AND uv.lock
+  # together. The "pip" ecosystem only widens pyproject.toml constraints, which
+  # leaves uv.lock stale and makes `uv sync --locked` fail in CI.
+  - package-ecosystem: "uv"
     directory: "/"
     schedule:
       interval: "daily"
