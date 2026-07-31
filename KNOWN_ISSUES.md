@@ -6,7 +6,7 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-07-31 (v0.2.0, plus the unreleased PDF adapter)
+Last updated: 2026-07-31 (v0.2.0, plus the merged but unreleased PDF adapter)
 
 ## Capability gaps
 
@@ -204,7 +204,45 @@ The four items v0.1.0 named as v0.2.0 work (slug-schema migration, the
 Service-CLI refactor, the full GraphQuery facade, and observability polish)
 did not land in v0.2.0. v0.2.0 shipped the lexical channel, the reindex
 performance fix, concurrency hygiene, and a security backlog instead. Those
-four remain open and are described above. No date is attached to them,
-because the last estimate was wrong by about three months.
+four remain open and are described above. No date is attached to anything
+below, because the last estimate was wrong by about three months.
+
+Ordering, and the constraint that forces it:
+
+1. **CLI uses Service.** The highest user-visible item on the list. Today
+   `vault-engine search` runs one retrieval channel while `POST /query` runs
+   three, so the CLI is quietly the weaker path and the README's description
+   of the engine is not true of it. Code-only, so it stays revertible.
+2. **`schema_version` on `embedding_meta`, alone.** One additive column plus
+   the migration ladder. Landing it by itself is what lets every later
+   migration be a single-variable change, which is the opposite of the
+   bundling an earlier draft of ADR 0006 proposed.
+3. **Kind-prefixed slugs.** Blocked on a design question that has no answer
+   yet: wikilinks in a vault are written `[[foo]]`, not `[[topic-foo]]`, so
+   prefixed slugs need a bare-target resolution rule, and if both `topic-foo`
+   and `raw-foo` exist the collision reappears at link-resolution time. A
+   loud `SlugCollisionError` is a defensible state; a half-designed
+   resolution rule is not.
+4. **Source coordinates.** ADR 0006 deliberately stopped at artifact
+   retention. The coordinates ADR should be written against what the PDF
+   extractor actually emits, now that one exists. The first draft of 0006 was
+   refuted precisely because it designed the storage before the producer.
+5. **Chunk identity through the router.** `Router._vector_search` discards
+   `chunk_idx`, so no chunk-level provenance can reach a transport regardless
+   of how it is stored. This is a prerequisite for (4), not a follow-on.
+
+Not scheduled, with reasons rather than vague deferral:
+
+- **ANN vector index.** ADR 0001's own revisit trigger is sustained usage
+  above roughly 50k chunks. No such usage exists, and the README commits to
+  personal-vault scale. Building it now would contradict a decision this repo
+  already wrote down.
+- **Zotero bridge.** The clearest unmet need in the surrounding tooling, and
+  the least coupled to everything above. It reads another application's live
+  SQLite, which is a new trust boundary and wants its own security review
+  before any code.
+- **OCR.** The PDF adapter refuses a scanned document rather than guessing.
+  Adding OCR means deciding what confidence an OCR'd citation carries, which
+  is a citation-integrity question and not a dependency question.
 
 The deferred items in this file are real, and none are hidden.
