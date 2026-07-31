@@ -109,6 +109,41 @@ facade, so a second transport would have to reimplement them.
 
 ## Correctness and robustness
 
+### A cache built before the vault stamp is not audited, only adopted
+
+Unreleased on `main`: `VecStore.open()` records the vault a store was built
+from and refuses to open it from another (`VaultPathMismatch`). A store built
+*before* that stamp existed carries no record of its origin, so it adopts
+whichever vault opens it first. That is deliberate — the alternative is
+forcing every existing user to re-embed on upgrade — but it means a cache
+already contaminated by two vaults stays contaminated, silently, until
+someone runs `vault-engine reindex --force`. The engine cannot tell a clean
+pre-stamp store from a mixed one, because nothing recorded the difference at
+the time. If you have ever run two vaults without `--cache`, assume yours is
+mixed and force a rebuild once.
+
+### The vault stamp compares path strings, so a moved vault costs a re-embed
+
+The stamp is the resolved `vault_path` as text. Move or rename the vault
+directory and the next open fails closed with `VaultPathMismatch`; the
+documented recovery is `reindex --force`, which wipes the store and re-embeds
+from scratch. On a large vault against the real model, that is minutes to
+an hour. Content-addressing the vault instead of path-addressing it would
+avoid the cost, and nothing here is designed to prevent that later; a symlink
+farm or a bind mount will also trip it. Fail-closed-and-loud was chosen over
+silently re-embedding, on the grounds that a retrieval tool that has already
+mixed two corpora once should not fix that by adding a second silent
+behavior.
+
+### Pruning happens on `rebuild()`, not on every write path
+
+`Indexer.rebuild()` now deletes slugs the vault no longer has. `reindex_page`
+still handles only the file it was handed (drop-on-delete, drop-on-oversize);
+it does not scan for other slugs that went missing. A long-lived `serve` /
+`mcp` process that only ever receives watcher events therefore does not prune
+until something calls `rebuild()` — which `Service.start()` does at startup,
+so the window closes on restart rather than staying open forever.
+
 ### Slug schema is filename-stem-only
 
 Two pages with the same stem in different directories (`wiki/topics/foo.md`
