@@ -107,3 +107,18 @@ def test_cli_add_reports_relative_path_through_symlinked_vault(tmp_path):
     result = runner.invoke(app, ["add", str(fixture), "--vault", str(link)])
     assert result.exit_code == 0, result.stdout
     assert result.stdout.startswith("Wrote raw/")
+
+
+def test_cli_add_reports_pdf_pages_skipped(tmp_path):
+    """A PDF with image-only pages writes `## p. 1` then `## p. 3`; the gap has
+    to be surfaced, same as `status` / `reindex` surface unreadable pages."""
+    from tests.test_pdf_ingester import _pdf_file
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    doc = _pdf_file(tmp_path, [["Page one."], [], ["Page three."]], name="gappy.pdf")
+
+    result = runner.invoke(app, ["add", str(doc), "--vault", str(vault)])
+    assert result.exit_code == 0, result.stdout
+    assert "pages skipped (unreadable): 1" in result.stdout
+    assert "page 2: no extractable text layer" in result.stdout

@@ -350,13 +350,16 @@ def add(
 
     from vault_engine.pdf_ingester import PdfIngestError, add_pdf
     from vault_engine.url_ingester import add_url
+    from vault_engine.vault_reader import SkippedPage
 
     if not vault.exists():
         typer.echo(f"Error: vault path does not exist: {vault}", err=True)
         raise typer.Exit(2)
 
+    is_pdf = urlparse(source).scheme not in ("http", "https")
+    skipped: list[SkippedPage] = []
     try:
-        if urlparse(source).scheme in ("http", "https"):
+        if not is_pdf:
             path = add_url(
                 vault_path=vault,
                 url=source,
@@ -369,6 +372,7 @@ def add(
                 pdf_path=Path(source),
                 overwrite=overwrite,
                 title_override=title,
+                skipped=skipped,
             )
     except (FileExistsError, FileNotFoundError, PdfIngestError) as e:
         typer.echo(f"Error: {e}", err=True)
@@ -378,6 +382,12 @@ def add(
     # or a symlinked root (/tmp -> /private/tmp on macOS) raises here.
     rel = path.relative_to(vault.resolve()) if path.is_absolute() else path
     typer.echo(f"Wrote {rel}")
+    if is_pdf:
+        # Same convention as `status` / `reindex`: a skipped page is counted
+        # and named, never dropped silently.
+        typer.echo(f"pages skipped (unreadable): {len(skipped)}")
+        for s in skipped:
+            typer.echo(f"  skip {s.path}: {s.reason}")
     typer.echo("Next: run `/vault ingest <path>` (or batch ingest) to merge into the wiki.")
 
 
