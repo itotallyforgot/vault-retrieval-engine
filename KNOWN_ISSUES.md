@@ -76,17 +76,23 @@ size cap is a real gap, not just a documentation bug.
 `Indexer` plus `Retrieval` directly. Only `serve` and `mcp` go through
 `Service`.
 
-This matters because the two paths do different retrieval.
-`Retrieval.search` encodes the query and calls `vec.search`, which is the
-vector channel and nothing else. `Service.query` goes through
-`Router.dispatch`, which fans out to vector, lexical (BM25), and topology
-and fuses with RRF. So `vault-engine search "..."` and `POST /query` with
-the same string return results built from different evidence. The CLI is
-the weaker of the two.
+The retrieval half of this is fixed, unreleased. `cli.search` builds a
+`Router` from the already-open `Indexer` and calls `dispatch`, the same
+three-channel RRF path `Service.query` uses, so `vault-engine search "..."`
+and `POST /query` now answer from the same evidence. `EvalRunner` already
+built its Router the same way, which is why the eval rig was measuring the
+HTTP path rather than the CLI one.
 
-Making `Service` the single assembler needs a
-`Service.start(rebuild=False, watch=False)` mode so CLI commands do not pay
-for a full rebuild on entry. Not done.
+What remains is object-graph duplication rather than a behavior gap.
+`status`, `reindex`, `search`, `expand`, `source`, and `eval` still construct an
+`Indexer` (and, for `expand` / `source`, a `Retrieval`) directly instead of
+going through `Service`. Making `Service` the single assembler needs a
+lifecycle that skips the rebuild for commands that do not need one, and a
+naive `Service.start(rebuild=False)` will not do: nothing but
+`Indexer.rebuild()` populates the graph, so a no-rebuild start leaves it
+empty and silently breaks `Router._classify`, `topology_walk`, and
+`_infer_seed`. `Retrieval` also cannot simply retire, because `citations.py`
+and `eval.py` both depend on `Retrieval.expand` / `.source`. Not done.
 
 ### Transport facade is partial
 
@@ -209,10 +215,14 @@ below, because the last estimate was wrong by about three months.
 
 Ordering, and the constraint that forces it:
 
-1. **CLI uses Service.** The highest user-visible item on the list. Today
-   `vault-engine search` runs one retrieval channel while `POST /query` runs
-   three, so the CLI is quietly the weaker path and the README's description
-   of the engine is not true of it. Code-only, so it stays revertible.
+1. **CLI uses the Router.** Landed on `main`, unreleased. The user-visible
+   half of what this item was for: `vault-engine search` now dispatches
+   through `Router` instead of `Retrieval`, so it answers from the same three
+   channels as `POST /query`. It does *not* route through `Service`, and
+   deliberately so. A `Service` lifecycle that skips the rebuild would leave
+   the graph empty and break the very topology channel it exists to add.
+   The remaining Service consolidation is object-graph cleanup with no
+   retrieval-quality payoff, and is described above.
 2. **`schema_version` on `embedding_meta`, alone.** One additive column plus
    the migration ladder. Landing it by itself is what lets every later
    migration be a single-variable change, which is the opposite of the
