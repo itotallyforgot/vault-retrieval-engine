@@ -167,3 +167,18 @@ def test_graph_stats_endpoint_requires_auth(app_with_auth):
     token = _bearer_token()
     r = client.get("/graph/stats", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 200
+
+
+def test_query_response_carries_chunk_identity(app_no_auth):
+    """Additive fields: fused hits name the chunk that matched. Existing keys
+    are untouched, so this cannot break an older client."""
+    client = TestClient(app_no_auth)
+    r = client.post("/query", json={"q": "alpha"})
+    assert r.status_code == 200
+    hits = r.json()["fused_hits"]
+    assert hits
+    for h in hits:
+        assert {"doc_id", "rrf_score", "channels", "per_channel_scores"} <= set(h)
+        assert "chunk_idx" in h
+        assert "per_channel_chunks" in h
+    assert any(h["chunk_idx"] is not None for h in hits)

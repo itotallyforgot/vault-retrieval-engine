@@ -118,6 +118,10 @@ def build_app(svc: Service, *, secret: str | None, bind_addr: str | None = None)
                 "rrf_score": h.rrf_score,
                 "channels": list(dict.fromkeys(h.channels)),  # dedupe, preserve order
                 "per_channel_scores": h.per_channel_scores,
+                # Additive: which chunk of the page matched. ``null`` when the
+                # page was reached only by the (page-level) topology channel.
+                "chunk_idx": h.chunk_idx,
+                "per_channel_chunks": h.per_channel_chunks,
             }
             for h in result["fused_hits"]
         ]
