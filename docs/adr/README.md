@@ -11,6 +11,8 @@ Numbered records of non-obvious architectural decisions. New ADRs go here; exist
 | [0003](0003-inferred-edge-threshold.md) | INFERRED similarity edge threshold = 0.85 | Accepted |
 | [0004](0004-router-tiers.md) | Router classifies queries into LOOKUP / SEMANTIC / MULTI_HOP / HYBRID | Accepted |
 | [0005](0005-mxbai-embed-default.md) | Default embedding model: mxbai-embed-large-v1 | Accepted |
+| [0006](0006-source-coordinate-preservation.md) | Chunks carry source coordinates into the citation chain | Proposed |
+| [0007](0007-lexical-rrf-channel.md) | Lexical BM25 channel runs on every dispatch | Accepted |
 
 ## Format
 

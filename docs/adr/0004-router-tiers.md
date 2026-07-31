@@ -2,6 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-05-04
+**Superseded in part by:** [ADR 0007](0007-lexical-rrf-channel.md). The mode dispatch table below predates the lexical (BM25) channel and is no longer accurate.
 
 ## Context
 
