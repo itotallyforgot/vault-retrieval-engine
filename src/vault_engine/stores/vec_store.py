@@ -37,11 +37,30 @@ class EmbeddingModelMismatch(RuntimeError):
     """
 
 
+class VaultPathMismatch(RuntimeError):
+    """Raised when an existing store was built from a different vault.
+
+    One cache directory holds one vault's corpus. Sharing it across vaults
+    mixes two corpora in a single index, so the store fails closed rather
+    than serving another vault's chunks.
+    """
+
+
 class VecStore:
-    def __init__(self, db_path: Path, dim: int, model_name: str) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        dim: int,
+        model_name: str,
+        vault_path: Path | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
         self.dim = dim
         self.model_name = model_name
+        # Optional: when set, open() stamps the store with this vault and
+        # refuses to open it from any other. None skips the check entirely,
+        # which is what a bare store (tests, ad-hoc scripts) wants.
+        self.vault_path = Path(vault_path) if vault_path is not None else None
         self._conn: sqlite3.Connection | None = None
 
     def open(self, force_reset: bool = False) -> None:
@@ -88,6 +107,18 @@ class VecStore:
             )
             """
         )
+        # Which vault this store belongs to. A separate table rather than a
+        # column on embedding_meta: CREATE TABLE IF NOT EXISTS cannot add a
+        # column to an existing database, so a new table needs no migration
+        # and an already-built store adopts its current vault on first open.
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS store_meta (
+                singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+                vault_path TEXT NOT NULL
+            )
+            """
+        )
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS embedding_meta (
@@ -116,6 +147,26 @@ class VecStore:
                     f"is configured for model={self.model_name!r} dim={self.dim}. "
                     "Pass force_reset=True (or run `vault-engine reindex --force`) "
                     "to wipe the store and rebuild."
+                )
+
+        if self.vault_path is not None:
+            cur = self._conn.execute("SELECT vault_path FROM store_meta WHERE singleton=1")
+            row = cur.fetchone()
+            if row is None:
+                self._conn.execute(
+                    "INSERT INTO store_meta(singleton, vault_path) VALUES (1, ?)",
+                    (str(self.vault_path),),
+                )
+            elif row[0] != str(self.vault_path):
+                stored_vault = row[0]
+                self.close()
+                raise VaultPathMismatch(
+                    f"vec store at {self.db_path} was built from vault "
+                    f"{stored_vault}, but the engine is pointed at "
+                    f"{self.vault_path}. One cache directory holds one vault. "
+                    "Pass `--cache <dir>` to give this vault its own store, "
+                    "or run `vault-engine reindex --force` if the vault simply "
+                    "moved and you want to re-embed it here."
                 )
         self._conn.commit()
 
@@ -243,6 +294,16 @@ class VecStore:
             vec = np.frombuffer(blob, dtype=np.float32).copy()
             out.append((chunk_idx, vec))
         return out
+
+    def all_slugs(self) -> set[str]:
+        """Every page slug currently held by the store.
+
+        The Indexer diffs this against the vault walk to prune pages that
+        were renamed or deleted while the engine was not running.
+        """
+        assert self._conn is not None
+        cur = self._conn.execute("SELECT DISTINCT page_slug FROM chunk_meta")
+        return {row[0] for row in cur.fetchall()}
 
     def get_checksums(self, page_slug: str) -> dict[int, str]:
         """Return {chunk_idx: checksum} for all chunks belonging to page_slug.

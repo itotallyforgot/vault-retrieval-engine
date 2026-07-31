@@ -9,7 +9,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from vault_engine.config import EngineConfig
+from vault_engine.config import EngineConfig, load_config
 from vault_engine.embedder import (
     Embedder,
     MockEmbedder,
@@ -64,11 +64,11 @@ def main(
     if vault is None:
         typer.echo("Error: --vault is required for this command.", err=True)
         raise typer.Exit(2)
-    cfg = EngineConfig(
-        vault_path=vault,
-        cache_dir=cache or EngineConfig(vault_path=vault).cache_dir,
-    )
-    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    # load_config, not a bare EngineConfig: it is what reads
+    # VAULT_ENGINE_CACHE_DIR, which the README documents and these commands
+    # used to ignore. With the env var unset and no --cache, it resolves to
+    # the same default cache dir as before.
+    cfg = load_config(vault, cache)
     _state["cfg"] = cfg
     if ctx.invoked_subcommand == "eval":
         return
@@ -143,6 +143,10 @@ def reindex(
         skip_style = "yellow" if report.pages_skipped else "green"
         console.print(
             f"pages skipped (unreadable): [{skip_style}]{report.pages_skipped}[/{skip_style}]"
+        )
+        prune_style = "yellow" if report.pages_pruned else "green"
+        console.print(
+            f"pages pruned (gone from vault): [{prune_style}]{report.pages_pruned}[/{prune_style}]"
         )
         for s in report.skipped:
             console.print(f"  [yellow]skip[/yellow] {s.path}: {s.reason}")

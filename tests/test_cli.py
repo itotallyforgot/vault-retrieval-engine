@@ -122,3 +122,46 @@ def test_cli_add_reports_pdf_pages_skipped(tmp_path):
     assert result.exit_code == 0, result.stdout
     assert "pages skipped (unreadable): 1" in result.stdout
     assert "page 2: no extractable text layer" in result.stdout
+
+
+def test_cli_honors_cache_dir_env_var(monkeypatch, sample_vault, tmp_path):
+    """README documents VAULT_ENGINE_CACHE_DIR; `status` used to ignore it.
+
+    The callback built an EngineConfig directly instead of calling
+    load_config, so only `serve` and `mcp` ever read the env var.
+    """
+    env_cache = tmp_path / "env-cache"
+    monkeypatch.setenv("VAULT_ENGINE_CACHE_DIR", str(env_cache))
+
+    result = runner.invoke(app, ["--vault", str(sample_vault), "--mock-embedder", "status"])
+    assert result.exit_code == 0, result.stdout
+    # rich hard-wraps long paths at the console width, so match on the
+    # unwrapped output rather than the raw stdout.
+    assert str(env_cache.resolve()) in result.stdout.replace("\n", "")
+    assert (env_cache / "embeddings.db").exists()
+
+
+def test_cli_explicit_cache_flag_beats_env_var(monkeypatch, sample_vault, tmp_path):
+    monkeypatch.setenv("VAULT_ENGINE_CACHE_DIR", str(tmp_path / "env-cache"))
+    flag_cache = tmp_path / "flag-cache"
+
+    result = runner.invoke(
+        app,
+        ["--vault", str(sample_vault), "--cache", str(flag_cache), "--mock-embedder", "status"],
+    )
+    assert result.exit_code == 0, result.stdout
+    assert str(flag_cache.resolve()) in result.stdout.replace("\n", "")
+
+
+def test_cli_reindex_reports_pruned_pages(sample_vault, tmp_path):
+    cache = tmp_path / "cache"
+    args = ["--vault", str(sample_vault), "--cache", str(cache), "--mock-embedder", "reindex"]
+
+    first = runner.invoke(app, args)
+    assert first.exit_code == 0, first.stdout
+    assert "pages pruned (gone from vault): 0" in first.stdout
+
+    (sample_vault / "wiki" / "topics" / "beta.md").unlink()
+    second = runner.invoke(app, args)
+    assert second.exit_code == 0, second.stdout
+    assert "pages pruned (gone from vault): 1" in second.stdout

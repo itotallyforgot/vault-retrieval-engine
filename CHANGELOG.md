@@ -9,6 +9,33 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
+### Security
+- **One vault's pages could be retrieved from another vault's index.**
+  `EngineConfig.cache_dir` defaulted to `~/.cache/vault-retrieval` with no
+  vault keying, and `embeddings_db` was a fixed `cache_dir/embeddings.db`, so
+  every vault on a machine that did not pass `--cache` wrote into one store.
+  Reproduced end to end: index vault A (holding a confidential page), index
+  vault B, search B, and A's page comes back as a top hit with its full chunk
+  text. It survived repeated rebuilds of B and survived deleting vault A from
+  disk. `serve` and `mcp` share the default, so the same contamination reached
+  HTTP responses and MCP tool results. `CitationAssembler._walk` drops slugs it
+  cannot resolve in the current vault without erroring, so a leaked hit printed
+  content with an empty citation chain and no warning — in a tool whose pitch is
+  auditable citation.
+  - `VecStore.open()` now records the vault a store was built from in a new
+    `store_meta` table and raises `VaultPathMismatch` when a different vault
+    opens it, naming both paths and both escape hatches (`--cache <dir>` for a
+    genuine second vault, `reindex --force` for one that moved). The check sits
+    directly below the existing `EmbeddingModelMismatch` check and fails closed,
+    rather than silently partitioning the cache by a hash of the vault path: a
+    moved vault would then re-embed for an hour with no explanation, and a tool
+    that has already silently mixed two corpora should not answer that with a
+    second silent behavior.
+  - A store built before this change has no stamp, so it adopts its current
+    vault on first open. Nobody re-embeds on upgrade. If you have run more than
+    one vault through the default cache, run `vault-engine reindex --force` once
+    to rebuild from vault truth.
+
 ### Changed
 - **`vault-engine search` now runs all three retrieval channels, and its
   output changed to say so.** This is a user-visible change to a released
@@ -46,6 +73,29 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
     untouched.
 
 ### Fixed
+- **`Indexer.rebuild()` never pruned.** A page renamed or deleted while the
+  engine was down stayed in the store forever — searchable, content included.
+  `delete_page` was only reachable from `reindex_page` on a live watcher event,
+  so a vault edited with the engine stopped (or edited on another machine and
+  synced) accumulated ghost pages that no vault walk would ever contradict.
+  `rebuild()` now diffs `VecStore.all_slugs()` against the pages it just walked
+  and deletes what is gone, across all three tables the chunk lives in
+  (`chunks`, `chunks_fts`, `chunk_meta`) — the FTS index is a separate table and
+  would otherwise keep serving the deleted page over the lexical channel. The
+  count rides on `IndexReport.pages_pruned` and prints from `reindex` as
+  `pages pruned (gone from vault): N`, the same convention as
+  `pages skipped (unreadable)`. This ships with the vault stamp above and not
+  before it: pruning alone would have turned silent cross-vault contamination
+  into a mutual wipe-and-re-embed every time the user switched vaults.
+- `VAULT_ENGINE_CACHE_DIR` is now read by `status`, `reindex`, `search`,
+  `expand`, and `source`. The README documented the env var for all of them,
+  but the main CLI callback constructed an `EngineConfig` directly and never
+  called `load_config`, so only `serve` and `mcp` honored it. The callback now
+  goes through `load_config`; with the env var unset and no `--cache`, it
+  resolves to the same cache directory as before.
+- The README documented the default cache directory as
+  `~/.cache/vault-engine`. It is and always was `~/.cache/vault-retrieval`
+  (`%APPDATA%/vault-retrieval` on Windows).
 - `search`, `expand`, and `source` no longer lose `[[wikilinks]]` from printed
   vault content. `console.print` parsed them as rich markup tags and deleted
   them, so an excerpt reading `Alpha references [[beta]]` on disk printed as
