@@ -287,6 +287,9 @@ def serve(
 def mcp(
     vault: Path = typer.Option(..., "--vault", help="Path to vault root."),
     cache: Path | None = typer.Option(None, "--cache", help="Cache directory."),
+    embedder: str = typer.Option(
+        "default", "--embedder", help="Embedder to use: 'default' (SentenceTransformer) or 'mock'."
+    ),
 ) -> None:
     """Run the MCP stdio server."""
     from vault_engine.config import load_config
@@ -294,7 +297,14 @@ def mcp(
     from vault_engine.service import Service
 
     cfg = load_config(vault, cache)
-    svc = Service(cfg)
+
+    # The top-level --mock-embedder never reaches here: the callback returns
+    # early for `mcp`. Manage embedder selection locally, like `eval` does.
+    active_embedder: Embedder | None = None
+    if embedder == "mock":
+        active_embedder = MockEmbedder(dim=cfg.embedding_dim)
+
+    svc = Service(cfg, embedder=active_embedder)
     svc.start()
     serve_stdio(svc)
 
