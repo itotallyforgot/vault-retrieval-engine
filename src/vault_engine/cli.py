@@ -321,7 +321,7 @@ def mcp(
 
 @app.command()
 def add(
-    url: str = typer.Argument(..., help="URL of the article to fetch."),
+    source: str = typer.Argument(..., help="URL of the article to fetch, or a local .pdf path."),
     vault: Path = typer.Option(..., "--vault", help="Path to vault root."),
     overwrite: bool = typer.Option(
         False,
@@ -334,7 +334,11 @@ def add(
         help="Override the auto-detected title (slug is derived from this).",
     ),
 ) -> None:
-    """One-shot fetch + extract a URL into <vault>/raw/<slug>.md (P3 #5).
+    """One-shot ingest a URL or a local PDF into <vault>/raw/<slug>.md.
+
+    An http(s) argument is fetched and extracted (P3 #5); anything else is
+    treated as a local PDF path, whose original is retained under
+    `raw/_originals/` and identified in the page's frontmatter (ADR 0006).
 
     The file lands with `ingested: false` frontmatter, ready for
     `/vault ingest <path>` (or batch ingest) to merge into the wiki. The
@@ -342,25 +346,48 @@ def add(
     synthesis keeps engine work deterministic and lets the user review
     every fetch before it shapes topic pages.
     """
+    from urllib.parse import urlparse
+
+    from vault_engine.pdf_ingester import PdfIngestError, add_pdf
     from vault_engine.url_ingester import add_url
+    from vault_engine.vault_reader import SkippedPage
 
     if not vault.exists():
         typer.echo(f"Error: vault path does not exist: {vault}", err=True)
         raise typer.Exit(2)
 
+    is_pdf = urlparse(source).scheme not in ("http", "https")
+    skipped: list[SkippedPage] = []
     try:
-        path = add_url(
-            vault_path=vault,
-            url=url,
-            overwrite=overwrite,
-            title_override=title,
-        )
-    except FileExistsError as e:
+        if not is_pdf:
+            path = add_url(
+                vault_path=vault,
+                url=source,
+                overwrite=overwrite,
+                title_override=title,
+            )
+        else:
+            path = add_pdf(
+                vault_path=vault,
+                pdf_path=Path(source),
+                overwrite=overwrite,
+                title_override=title,
+                skipped=skipped,
+            )
+    except (FileExistsError, FileNotFoundError, PdfIngestError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from e
 
-    rel = path.relative_to(vault) if path.is_absolute() else path
+    # Both adapters return a resolved path, so the vault must be resolved too
+    # or a symlinked root (/tmp -> /private/tmp on macOS) raises here.
+    rel = path.relative_to(vault.resolve()) if path.is_absolute() else path
     typer.echo(f"Wrote {rel}")
+    if is_pdf:
+        # Same convention as `status` / `reindex`: a skipped page is counted
+        # and named, never dropped silently.
+        typer.echo(f"pages skipped (unreadable): {len(skipped)}")
+        for s in skipped:
+            typer.echo(f"  skip {s.path}: {s.reason}")
     typer.echo("Next: run `/vault ingest <path>` (or batch ingest) to merge into the wiki.")
 
 

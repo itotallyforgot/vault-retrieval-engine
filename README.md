@@ -29,6 +29,7 @@ If you've decided cloud RAG is fine for your use case, this isn't the right tool
 - **Multi-hop graph walks** over wikilink edges plus inferred similarity edges (cosine threshold calibrated for vault topology).
 - **Rank fusion:** vector, lexical, and topology results are fused with reciprocal rank fusion, so a page that only one channel liked can still surface. Every hit reports which channels found it.
 - **Citation chains:** each retrieved chunk traces back to its page and onward to source pages, producing a verifiable evidence trail.
+- **PDF ingestion:** `vault-engine add ./paper.pdf` extracts a local PDF's text layer into `raw/`, one `## p. N` section per page, so page markers ride into the index as ordinary headings. The original is retained under `raw/_originals/` and identified in frontmatter by its sha256 (see [ADR 0006](./docs/adr/0006-source-coordinate-preservation.md)). A PDF with no text layer is refused rather than ingested empty. There is no OCR.
 - **Watcher:** auto-reindex on filesystem changes, so newly-edited pages are queryable within seconds.
 - **Eval harness:** JSONL fixture runner with latency SLOs and page-coverage assertions. CI runs the eval against a mock embedder + sample vault.
 - **Service surfaces:** MCP stdio (Claude Code, Codex, Cursor) and HTTP/JSON (Tailscale) in addition to the CLI.
@@ -103,6 +104,7 @@ The `mock` embedder is fast and deterministic for iteration. Switch to `sentence
 | `vault-engine source <page>` | Resolve `wiki/topics/<page>` → its source pages |
 | `vault-engine eval --fixtures <path> [--embedder mock\|default]` | Run the JSONL fixture eval; assert latency + page-coverage |
 | `vault-engine add <url> --vault <path>` | One-shot scrape a URL into `raw/` (trafilatura extraction). Note: `add`, `serve`, `mcp`, and `hook` define their own `--vault` flag; placement matters. |
+| `vault-engine add <file.pdf> --vault <path>` | One-shot ingest a local PDF into `raw/`, one `## p. N` section per page (pypdf text layer). Retains the original at `raw/_originals/<slug>.pdf`. Local files only; no remote PDF fetch. |
 | `vault-engine mcp --vault <path>` | Start MCP stdio server |
 | `vault-engine serve --vault <path>` | Start HTTP/JSON server |
 | `vault-engine hook install --vault <path>` | Install the vault-side Glob/Grep hook |
