@@ -34,6 +34,21 @@ lives in the v0.2.0 hardening epic (tracked in an internal issue tracker).
   (`b68cfa92…`). Custom user hooks are never overwritten; legacy hooks
   are auto-migrated with a `.legacy.bak` next to the new dispatcher. (#13)
 
+### Fixed
+- `vault-engine mcp` ignored the top-level `--mock-embedder` flag: the
+  Typer callback returns early for `mcp`, so `Service(cfg)` silently fell
+  back to `SentenceTransformerEmbedder` and downloaded ~670MB. The command
+  now takes its own `--embedder default|mock`, mirroring `eval`.
+  (`serve` has the same latent bug and is deliberately untouched.)
+- `tests/smoke_install_vault_overlays_dispatcher.sh` now actually asserts
+  what it claimed: skill-overlay content, absence of a spurious
+  `.legacy.bak`, `.legacy.bak` byte-equality with the migrated hook,
+  byte-equality of a refused custom hook (a `grep` passed on an append),
+  and a real re-run idempotence scenario.
+- `tests/test_mcp_server.py` gained a genuine stdio/JSON-RPC roundtrip
+  against a spawned `vault-engine mcp` child process; every prior test
+  called the handlers in-process, leaving `serve_stdio()` uncovered.
+
 ### Bumped
 - `actions/checkout` 4 → 6 (#12)
 - `actions/setup-python` 5 → 6 (#11)
