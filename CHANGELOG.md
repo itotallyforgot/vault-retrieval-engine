@@ -9,7 +9,76 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- Local-file PDF ingestion. `vault-engine add ./paper.pdf --vault <path>`
+  extracts a PDF's text layer with `pypdf` and writes `raw/<slug>.md` with
+  one `## p. N` section per text-bearing page. Page markers are ordinary H2
+  headings, so `chunker.chunk_page` (which splits on H1/H2 and keeps the
+  heading line in the chunk text) carries them into the vector store and the
+  FTS index with no schema change. `add` routes an `http(s)` argument to the
+  existing URL adapter and anything else to the PDF adapter; there is no
+  remote PDF fetch, which keeps the SSRF surface `url_ingester` closes shut.
+- ADR 0006 artifact retention, implemented for PDFs. The source file is
+  copied to `raw/_originals/<slug>.pdf` and the generated page records
+  `source_artifact`, `source_sha256`, and `source_media_type` in
+  frontmatter, so a citation chain can name the original a claim descends
+  from and that claim is checkable. `url_ingester.write_raw_file` grew
+  `source_type` and `extra_frontmatter` parameters to render these; both
+  default to today's behaviour.
+- `pypdf` dependency (BSD-3-Clause, compatible with this repo's MIT
+  licence). PyMuPDF was rejected: it is AGPL-3.0.
+
+### Fixed
+- `vault-engine add` no longer crashes when `--vault` points at a symlinked
+  root (`/tmp` resolves to `/private/tmp` on macOS). Both adapters return a
+  resolved path, so the closing `path.relative_to(vault)` raised
+  `ValueError` before printing anything. Pre-existing on the URL path too;
+  found by running the CLI rather than only the tests.
+- PDF pages with no extractable text layer are counted and reported rather
+  than silently dropped. `extract_pdf_markdown` / `add_pdf` take the same
+  optional `skipped: list[SkippedPage]` out-parameter `vault_reader.iter_pages`
+  takes, and `vault-engine add` prints `pages skipped (unreadable): N`
+  followed by one line per page, matching `status` and `reindex`. Before
+  this, a 4-page PDF with two image-only pages wrote `## p. 1` then
+  `## p. 4` and said nothing.
+- A failed page write no longer leaves the retained original behind. The
+  original is still written first so its own guards run before anything
+  lands, but it is removed if `write_raw_file` then fails.
+
+### Security
+- A PDF with no extractable text layer is refused with an error naming the
+  file, rather than ingested as an empty page. There is no OCR.
+- **Extracted text can no longer forge a page marker.** `chunker.chunk_page`
+  splits on `^#{1,2}\s+` and labels the chunk with the heading, so a PDF
+  whose page-2 text layer contained a line `## p. 1` produced a second chunk
+  labelled `p. 1` — a document choosing its own citation in a tool built for
+  trustworthy citation. The accidental variant needed no attacker: any
+  extracted line opening with `# ` swallowed the page it came from. Every
+  extracted line that opens with `#` at column 0 is now escaped. The page
+  coordinate is still carried in band; moving it out of band (per-chunk
+  metadata) is the durable fix, deferred to the coordinates ADR.
+- **The retained-original traversal guard is anchored to the vault root**,
+  not to an already-resolved `raw/_originals/`. Resolving the originals
+  directory first made the containment check a tautology: with
+  `raw/_originals` a *symlinked directory*, the destination resolved to the
+  link target and the check passed, writing outside the vault. This matches
+  what `url_ingester.write_raw_file` already did.
+- **The extracted body is capped, not just the input file.** A 222 KB
+  Flate-compressed PDF expands to a 24 MB text layer; at the 10 MiB input
+  cap that extrapolates to roughly 1 GB. Such a page also exceeded
+  `vault_reader._MAX_PAGE_BYTES`, so the indexer skipped it forever while
+  `add` printed success and exited 0. Extraction now stops and refuses once
+  the accumulated body passes `_MAX_BODY_BYTES` (`_MAX_PAGE_BYTES` less
+  headroom for frontmatter), so anything written is guaranteed indexable.
+- **The PDF parse boundary catches broadly.** pypdf raises `KeyError`,
+  `RecursionError`, `struct.error`, and `AttributeError` on malformed input
+  — a bogus font reference raised `KeyError: '/DescendantFonts'` straight
+  through a three-exception handler and printed a Rich traceback exposing
+  local absolute paths. Any exception out of the parser is now re-raised as
+  `PdfIngestError` naming the file and the underlying exception type.
+- Retaining an original never silently overwrites an existing one, because
+  that would invalidate the `source_sha256` already recorded by whichever
+  page retained it. Pass `--overwrite` to replace.
 
 ## [0.2.0] - 2026-07-30
 

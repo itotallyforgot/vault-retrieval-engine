@@ -18,6 +18,7 @@ synthesis pass, not to a scraper.
 import ipaddress
 import re
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -326,11 +327,19 @@ def write_raw_file(
     *,
     clipped_at: str,
     overwrite: bool = False,
+    source_type: str = "article",
+    extra_frontmatter: Mapping[str, str] | None = None,
 ) -> Path:
     """Render frontmatter + body and write to `<vault>/raw/<slug>.md`.
 
     Verifies the resolved target stays inside ``vault_path`` to defend
     against symlinked / traversal-style vault roots.
+
+    ``source_type`` and ``extra_frontmatter`` exist for non-article adapters
+    (see :mod:`vault_engine.pdf_ingester`, which records the ADR 0006
+    ``source_artifact`` / ``source_sha256`` / ``source_media_type`` fields).
+    Extra values are rendered as double-quoted scalars through
+    :func:`_yaml_escape`, same as every other scalar here.
 
     Raises:
         FileExistsError: target file exists and ``overwrite`` is False.
@@ -367,7 +376,8 @@ def write_raw_file(
         f'author: "{_yaml_escape(article.author or "")}"',
         f'published: "{_yaml_escape(article.published or "")}"',
         f'clipped_at: "{_yaml_escape(quoted_clipped)}"',
-        'source_type: "article"',
+        f'source_type: "{_yaml_escape(source_type)}"',
+        *(f'{k}: "{_yaml_escape(v)}"' for k, v in (extra_frontmatter or {}).items()),
         "tags:",
         '  - "raw"',
         '  - "unprocessed"',

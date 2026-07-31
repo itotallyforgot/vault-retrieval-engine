@@ -6,26 +6,42 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-07-30 (v0.2.0)
+Last updated: 2026-07-31 (v0.2.0, plus the unreleased PDF adapter)
 
 ## Capability gaps
 
-### No PDF ingestion, and no non-markdown ingestion at all
+### PDF ingestion is local-file, text-layer only; no other non-markdown format
 
-The engine cannot read a PDF. Two independent places enforce this:
+Unreleased on `main`: `vault-engine add ./paper.pdf --vault <path>` extracts
+a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
+`## p. N` section per text-bearing page, retaining the original at
+`raw/_originals/<slug>.pdf`. What that still does not give you:
 
-- `url_ingester._ALLOWED_CONTENT_TYPES` is `("text/html",
-  "application/xhtml+xml", "text/plain")`. A URL that serves
-  `application/pdf` is refused with `FetchError: unsupported content-type`,
-  so `vault-engine add <pdf-url>` cannot bring one in.
-- `vault_reader.iter_pages` globs `vault_path.rglob("*.md")`. A PDF sitting
-  in the vault directory is invisible to the indexer even if you put it
-  there by hand.
-
-There is no extraction path, no OCR, and no plan encoded anywhere in the
-repo. If your knowledge lives in PDFs, this engine does not retrieve over
-it today. The same applies to any other non-markdown format: docx, epub,
-html files on disk, plain `.txt`.
+- **No OCR.** A page with no text layer is skipped, counted, and reported
+  (`pages skipped (unreadable): N`, same convention as `status` /
+  `reindex`); a PDF where *every* page is image-only is refused outright.
+  Scanned documents need an OCR tool first.
+- **No remote PDF fetch.** `url_ingester._ALLOWED_CONTENT_TYPES` is still
+  `("text/html", "application/xhtml+xml", "text/plain")`, so
+  `vault-engine add <pdf-url>` is refused with `FetchError: unsupported
+  content-type`. Deliberate: fetching PDFs would reopen the SSRF surface
+  `url_ingester` closes, and `curl` first costs nothing.
+- **No docx, epub, html-on-disk, or plain `.txt`.** There is no extraction
+  path for any of them and none is planned in the repo.
+- **The retained original stays invisible to the engine.**
+  `vault_reader.iter_pages` still globs `vault_path.rglob("*.md")`, so
+  nothing indexes `raw/_originals/` and nothing re-verifies the recorded
+  `source_sha256`. ADR 0006 records that as a known negative.
+- **The page coordinate is carried in band.** `## p. N` is an ordinary H2 in
+  the same markdown body the document contributes text to. Extracted lines
+  that open with `#` are escaped, so a document cannot author its own
+  `## p. 1` and pick which page its content appears to cite, but the
+  coordinate still shares a channel with the content. Out-of-band per-chunk
+  page metadata is the durable fix and is deferred to the coordinates ADR.
+- **Extraction is capped.** The input file is capped at 10 MiB and the
+  extracted text at just under `vault_reader._MAX_PAGE_BYTES`, so a
+  compression bomb is refused rather than written as a page the indexer
+  would silently skip forever.
 
 ### The chunker has no size cap, and its docstring says otherwise
 
