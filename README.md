@@ -1,8 +1,14 @@
 # vault-engine
 
-Local semantic retrieval engine over personal markdown vaults. No external API. Citation chains for auditable retrieval.
+A bolt-on turbocharger for a markdown vault. Local-only retrieval, no external API, citation chains you can audit.
 
-A plug-in for markdown/Obsidian-style vaults — overlays retrieval, semantic search, and citation chains onto a vault that runs standalone without it. Works with any markdown vault that uses wikilinks; the vault remains the source of truth and the engine is best-effort enrichment.
+Your vault already works without this. Wikilinks, folders, maybe a hand-maintained `KNOWLEDGE_ROUTER.md` pointing at the good stuff. The trouble with an index like that is it only knows what you remembered to put in it.
+
+vault-engine bolts three retrieval channels onto the same files and fuses the results: semantic vector search, BM25 lexical search, and graph topology walked over both your explicit wikilinks and similarity edges the engine infers on its own. Every hit comes back with a citation chain from chunk to page to source, so grounding is auditable instead of assumed. Nothing leaves the machine.
+
+It pays off most in a dense, cross-domain vault, where the page you needed sits three hops away in a discipline you weren't searching. It isn't a large-corpus system. Personal-vault scale is the target, roughly 10k pages, and sqlite-vec's brute-force scan turns into the bottleneck somewhere past 50k chunks. Semantic ranking on its own also can't reliably separate a claim from its negation, which is the whole reason the lexical channel exists. See [Known issues](./KNOWN_ISSUES.md) for the measured numbers.
+
+The vault stays the source of truth. The engine is best-effort enrichment: turn it off and you still have your notes.
 
 ## Why
 
@@ -19,12 +25,14 @@ If you've decided cloud RAG is fine for your use case, this isn't the right tool
 ## What it does
 
 - **Semantic search** over markdown chunks using local SentenceTransformer embeddings (mxbai, nomic, or MiniLM).
+- **Lexical search:** BM25 over an FTS5 index of the same chunks. Always runs. This is the keyword and word-order leg, and it's what disambiguates the negation and word-swap cases the embedder can't (see [Known issues](./KNOWN_ISSUES.md)).
 - **Multi-hop graph walks** over wikilink edges plus inferred similarity edges (cosine threshold calibrated for vault topology).
-- **Citation chains** — each retrieved chunk traces back to its page and onward to source pages, producing a verifiable evidence trail.
-- **Watcher** — auto-reindex on filesystem changes, so newly-edited pages are queryable within seconds.
-- **Eval harness** — JSONL fixture runner with latency SLOs and page-coverage assertions. CI runs the eval against a mock embedder + sample vault.
-- **Service surfaces** — MCP stdio (Claude Code, Codex, Cursor) and HTTP/JSON (Tailscale) in addition to the CLI.
-- **No external API** — all retrieval, embedding, and storage is local. Embedding model loads from local Hugging Face cache.
+- **Rank fusion:** vector, lexical, and topology results are fused with reciprocal rank fusion, so a page that only one channel liked can still surface. Every hit reports which channels found it.
+- **Citation chains:** each retrieved chunk traces back to its page and onward to source pages, producing a verifiable evidence trail.
+- **Watcher:** auto-reindex on filesystem changes, so newly-edited pages are queryable within seconds.
+- **Eval harness:** JSONL fixture runner with latency SLOs and page-coverage assertions. CI runs the eval against a mock embedder + sample vault.
+- **Service surfaces:** MCP stdio (Claude Code, Codex, Cursor) and HTTP/JSON (Tailscale) in addition to the CLI.
+- **No external API:** all retrieval, embedding, and storage is local. Embedding model loads from local Hugging Face cache.
 
 ## Architecture
 
@@ -259,13 +267,22 @@ src/vault_engine/
   chunker.py        # header-section chunker with checksum
   embedder.py       # SentenceTransformer + MockEmbedder
   indexer.py        # orchestrate chunk + embed + vec/graph stores
-  router.py         # heuristic LOOKUP/SEMANTIC/MULTI_HOP/HYBRID classifier
-  retrieval.py      # search, expand, multi_hop, graph_walk
+  router.py         # LOOKUP/SEMANTIC/MULTI_HOP/HYBRID classifier + 3-channel RRF dispatch
+  retrieval.py      # search, expand, multi_hop, graph_walk, topology_walk
   citations.py      # chunk -> page -> sources[] -> raw chain assembler
+  inference.py      # similarity-edge inference; INFERRED vs AMBIGUOUS banding
+  community.py      # Louvain community detection over the graph
+  reranker.py       # reciprocal rank fusion across channels
+  service.py        # long-lived Service: start/stop, query, graph facade
+  mcp_server.py     # MCP stdio transport (10 tools)
+  http_server.py    # FastAPI HTTP/JSON transport
+  auth.py           # HS256 JWT / bearer verification for the HTTP surface
+  url_ingester.py   # URL -> raw/ fetch with SSRF, rebinding, size guards
+  bow_adversarial.py # bag-of-words adversarial probe (embedder-swap gate)
   eval.py           # JSONL fixture runner with latency + coverage assertions
-  watcher.py        # watchdog adapter for fs events
+  watcher.py        # watchdog adapter for fs events (trailing-edge debounce)
   stores/
-    vec_store.py    # sqlite-vec adapter with checksum skip
+    vec_store.py    # sqlite-vec adapter + chunks_fts FTS5/BM25 index
     graph_store.py  # NetworkX DiGraph with alias resolution + BFS walk
 
 tests/
@@ -275,12 +292,18 @@ tests/
     eval_fixtures.jsonl
 
 scripts/
-  check-blocked-terms.sh   # pre-commit blocked-terms scan
-  smoke_real_vault.sh      # end-to-end test on a real vault
+  check-blocked-terms.sh       # pre-commit blocked-terms scan
+  smoke_real_vault.sh          # end-to-end test on a real vault
+  install-vault-overlays.sh    # drop engine-aware overlays into a vault
+  install-launchd-service.sh   # macOS LaunchAgent
+  install-windows-service.ps1  # NSSM service
 
 .github/workflows/
-  ci.yml            # gitleaks + zizmor + ruff + pytest + eval-rig-mock
-  security.yml      # ossf scorecard + dependency-review
+  ci.yml            # central paved-path ci (ruff/pyright/pytest) + smoke + eval-rig-mock
+  security.yml      # central security baseline (gitleaks, zizmor, scorecard, dependency-review)
+  codeql.yml        # daily CodeQL scan
+  dependabot-sweep.yml
+  scorecard.yml
 ```
 
 ## Development
@@ -308,18 +331,20 @@ uv run vault-engine --vault tests/fixtures/sample_vault eval \
     --embedder mock
 ```
 
-Conventional Commits format. CI runs gitleaks + zizmor + ruff + pytest + pyright + eval-rig-mock on pull requests and configured push branches.
+Conventional Commits format. On pull requests and configured push branches, CI runs the central paved-path job (ruff, pyright, pytest), the security baseline (gitleaks, zizmor, scorecard, dependency review), the three shell smoke harnesses, and the mock-embedder eval rig including the bag-of-words adversarial gate.
 
 ## Architecture decisions
 
-See [`docs/adr/`](docs/adr/README.md) for ADRs covering the non-obvious choices: sqlite-vec, NetworkX, the 0.85 INFERRED edge threshold, the router's mode boundaries, and the default embedding model.
+See [`docs/adr/`](docs/adr/README.md). Five ADRs are on `main`, covering sqlite-vec, NetworkX, the 0.85 INFERRED edge threshold, the router's mode boundaries, and the default embedding model. Two more are in flight and not yet merged: source-coordinate preservation (Proposed) and the lexical RRF channel (Accepted).
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 ## Status
 
-**v0.1.0 shipped** (2026-05-04, tag `v0.1.0`) — Phase 3 complete: encode-skip, INFERRED edges, NSSM Windows service, post-commit auto-reindex hook, URL → `raw/` adapter, ripgrep fallback. All P0 review findings addressed; 11 critical P1 fixes; 5 ADRs. Current local collection: 146 tests. See [`CHANGELOG.md`](./CHANGELOG.md) for the release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for honest carry-overs.
+**v0.2.0** adds the BM25 lexical channel and RRF fusion, the `AMBIGUOUS` similarity-edge band, the bag-of-words adversarial regression gate, a page-vector cache that removes the per-save reindex stall, trailing-edge watcher debounce, a macOS launchd service path, and a backlog of security fixes (DNS-rebinding pin, two CodeQL `py/bad-tag-filter` fixes, dependency advisory bumps, CI supply-chain hardening). Current local collection: 217 tests (215 passing, 2 xfail by design on the adversarial word-swap and shuffle classes). Five ADRs on `main`, two more in flight.
 
-**Current status**: post-v0.1.0 hardening is tracked as the v0.2.0 hardening epic (tracked in an internal issue tracker). Recent work has landed in `main`; see the `Unreleased` section of [`CHANGELOG.md`](./CHANGELOG.md) for shipped slices and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for deferred items.
+**v0.1.0** (2026-05-04, tag `v0.1.0`) shipped encode-skip, INFERRED edges, the NSSM Windows service, the post-commit auto-reindex hook, the URL to `raw/` adapter, and ripgrep fallback.
+
+See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: no PDF or non-markdown ingestion, no chunk size cap, and the CLI still runs vector-only search while the HTTP and MCP surfaces run all three channels.

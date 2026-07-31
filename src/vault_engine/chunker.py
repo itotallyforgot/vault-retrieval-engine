@@ -1,9 +1,13 @@
 """Header-aware markdown chunking.
 
-Splits a page on H1/H2 boundaries (configurable). Each chunk keeps the
-heading line and its body until the next header at the same or higher level.
-Chunks below a min size are merged into the next chunk; chunks above the
-max size are split on paragraph boundaries.
+Splits a page on H1/H2 boundaries only. Each chunk keeps the heading line
+and its body until the next H1 or H2.
+
+There is no size cap: a chunk is exactly one header section however long
+that section is, and ``EngineConfig.chunk_max_tokens`` is not consulted
+here or anywhere else. Nothing merges undersized chunks or splits
+oversized ones. See KNOWN_ISSUES.md ("The chunker has no size cap") for
+the retrieval consequences.
 """
 
 from __future__ import annotations

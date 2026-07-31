@@ -1,73 +1,194 @@
 # Known Issues
 
-Issues surfaced by the v0.1.0 multi-axis review and the cleanup that followed. Listed honestly so consumers can decide whether the engine fits their use case at current quality.
+What the engine does not do, or does badly, as of the latest tagged release.
+Listed so consumers can decide whether it fits their use case before
+installing it. Every entry below was re-verified against the code on the
+date in the header; entries that the code showed were already fixed have
+been deleted rather than left to rot.
 
-Last updated: 2026-06-11
+Last updated: 2026-07-30 (v0.2.0)
 
-## What landed in v0.1.0
+## Capability gaps
 
-The multi-axis review surfaced 12 P0 + 14 critical-P1 findings. As of v0.1.0 ship:
+### No PDF ingestion, and no non-markdown ingestion at all
 
-- **All security P0s fixed** — SSRF guards on URL ingestion, request size caps on the HTTP server (query body and `top_k` bounded at validation time; there is no request *rate* limiter), JWT exp-claim required, refuse-to-bind on non-loopback without a secret, blocked-terms scan with case-insensitive matching.
-- **All correctness P0s fixed** — service stop-race resolved, watcher rename emits both src and dest, slug collisions surface as SlugCollisionError, vec_store mutations atomic, file-size cap in reads.
-- **All documentation P0s fixed** — README CLI and eval-fixture schema match reality; sample vault expanded with multi-hop chains, alias chains, and an orphan; CI eval gate uses real expected_pages so it can fail.
-- **Performance P0s fixed** — graph walk replaced with bounded BFS, similarity-edge inference replaced with single-matmul, reindex_page does one disk walk instead of two.
-- **5 ADRs landed** — sqlite-vec, NetworkX, INFERRED threshold (0.85), router tiers, and default embedding model (mxbai-embed-large).
-- **Vault-overlay plug-in pattern landed** — engine-aware vault skills (synth, crawl) and the post-commit reindex hook moved out of the vault and into `overlays/` here, installable via `scripts/install-vault-overlays.sh`.
+The engine cannot read a PDF. Two independent places enforce this:
 
-## What's deferred to v0.2.0
+- `url_ingester._ALLOWED_CONTENT_TYPES` is `("text/html",
+  "application/xhtml+xml", "text/plain")`. A URL that serves
+  `application/pdf` is refused with `FetchError: unsupported content-type`,
+  so `vault-engine add <pdf-url>` cannot bring one in.
+- `vault_reader.iter_pages` globs `vault_path.rglob("*.md")`. A PDF sitting
+  in the vault directory is invisible to the indexer even if you put it
+  there by hand.
 
-### Architecture: CLI bypasses Service (P1-3)
+There is no extraction path, no OCR, and no plan encoded anywhere in the
+repo. If your knowledge lives in PDFs, this engine does not retrieve over
+it today. The same applies to any other non-markdown format: docx, epub,
+html files on disk, plain `.txt`.
 
-The CLI's `status`, `reindex`, `search`, `expand`, `source`, and `eval` commands construct an Indexer + Retrieval directly, while `serve` and `mcp` go through `Service`. Search via CLI uses the legacy `Retrieval` path (vec-only); search via HTTP/MCP uses `Service.router.dispatch` (dual-channel + RRF).
+### The chunker has no size cap, and its docstring says otherwise
 
-Two result shapes for the same logical query depending on transport. Refactor to make Service the single assembler is v0.2.0 work; a `Service.start(rebuild=False, watch=False)` mode will be needed for CLI commands that don't want a full rebuild on entry.
+`chunker.py` opens with:
 
-### Architecture: Transport facade (P1-4, partial)
+> Chunks below a min size are merged into the next chunk; chunks above the
+> max size are split on paragraph boundaries.
 
-A small typed surface landed on `Service`: `service.graph` (property), `service.graph_node(slug)`, `service.graph_stats()`. `mcp_server.py` and `http_server.py` no longer reach through `svc.graph_store.graph` for the most-common patterns.
+Neither behavior exists. `chunk_page` matches `^#{1,2}\s` (H1 and H2 only),
+slices the body between those matches, drops empty slices, and returns. No
+merge, no split, no length check anywhere in the function. `EngineConfig`
+does define `chunk_max_tokens: int = 512`, but the only reference to it in
+the entire repository outside that definition is a test asserting it is
+greater than zero. Nothing reads it.
 
-The full GraphQuery facade with all 10+ MCP tool primitives (`get_neighbors`, `get_community`, `god_nodes`, `shortest_path`, `find_topic_page`, `find_unlinked_references`, `get_linked_references`) is v0.2.0. Until then, transport handlers still inline some queries against `svc.graph` directly.
+The practical consequence: a page with a single H1 and 8,000 words of body
+becomes one chunk. That chunk gets one embedding, so retrieval either
+returns the whole thing or none of it, and the vector is the mean of eight
+thousand words of unrelated material. Deeply-nested pages that use H3 and
+below for their real structure chunk as though that structure were not
+there. Header discipline in the vault is doing load-bearing work that the
+engine's own docstring implies it does not need to.
 
-### Observability
+The docstring has been corrected to describe actual behavior. The missing
+size cap is a real gap, not just a documentation bug.
 
-- `vault-engine status` does not yet report the engine version, graph node/edge counts, or store fingerprint. Planned for v0.2.0.
-- HTTP/JSON request logging landed; per-channel timing on the retrieval hot path is still v0.2.0.
+## Architecture
+
+### CLI bypasses Service
+
+`status`, `reindex`, `search`, `expand`, `source`, and `eval` construct an
+`Indexer` plus `Retrieval` directly. Only `serve` and `mcp` go through
+`Service`.
+
+This matters because the two paths do different retrieval.
+`Retrieval.search` encodes the query and calls `vec.search`, which is the
+vector channel and nothing else. `Service.query` goes through
+`Router.dispatch`, which fans out to vector, lexical (BM25), and topology
+and fuses with RRF. So `vault-engine search "..."` and `POST /query` with
+the same string return results built from different evidence. The CLI is
+the weaker of the two.
+
+Making `Service` the single assembler needs a
+`Service.start(rebuild=False, watch=False)` mode so CLI commands do not pay
+for a full rebuild on entry. Not done.
+
+### Transport facade is partial
+
+`Service` exposes a small typed surface: `graph` (property), `graph_node`,
+`graph_stats`, and `graph_lock`. `http_server.py` is clean against it, using
+`svc.query()` and `svc.graph_stats()` only.
+
+`mcp_server.py` is not. It reaches through `svc.graph` directly in roughly a
+dozen places to implement `get_neighbors`, `get_community`, `god_nodes`,
+`shortest_path`, `find_topic_page`, `find_unlinked_references`, and
+`get_linked_references`, and reaches `svc.graph_store` for one more. Those
+primitives still live in the transport layer instead of behind a query
+facade, so a second transport would have to reimplement them.
+
+## Correctness and robustness
 
 ### Slug schema is filename-stem-only
 
-Two pages with the same stem in different directories (`wiki/topics/foo.md` vs `raw/foo.md`) currently raise `SlugCollisionError` at index time. Kind-prefixed slugs (`topic-foo`, `raw-foo`) would resolve cleanly but require a vec-store migration. Planned for v0.2.0 with auto-migration via a schema-version column on `embedding_meta`.
+Two pages with the same stem in different directories (`wiki/topics/foo.md`
+and `raw/foo.md`) raise `SlugCollisionError` at index time
+(`vault_reader.py`). Kind-prefixed slugs (`topic-foo`, `raw-foo`) would
+resolve this but require a vec-store migration, and there is no
+schema-version column on `embedding_meta` to migrate against yet.
 
-### URL ingestion robustness
+### URL ingestion has no retry
 
-`vault-engine add <url>` has SSRF, redirect, content-type, and size protections, but no retry/backoff on transient failures. A 5xx response or single ReadTimeout aborts with a `FetchError`. Retry-with-exponential-backoff planned for v0.2.0.
+`vault-engine add <url>` has SSRF, DNS-rebinding, redirect, content-type,
+and size protections, all verified in `url_ingester.py`. What it does not
+have is any retry or backoff: `grep` for retry, backoff, or sleep in that
+module returns nothing. A single 5xx or one `ReadTimeout` aborts the
+ingestion with a `FetchError`.
 
-### SentenceTransformer load
+### Embedding model loads eagerly
 
-`Service.__init__` loads the embedding model eagerly. The `EmbedderLoadError` wrapping landed (actionable error messages on import / load failures), but lazy-load on first encode is still v0.2.0 — until then, `serve` / `mcp` startup pays the model-load cost up front.
+`Service.__init__` constructs `SentenceTransformerEmbedder` unless a
+caller passes one in, so `serve` and `mcp` pay the model-load cost at
+startup rather than on first encode. `EmbedderLoadError` wrapping gives an
+actionable message when the load fails, but the load still happens up
+front.
 
-### Test coverage gaps
+### Observability
 
-- `url_ingester.fetch_url` lacks integration tests against mocked HTTP. Existing tests cover the extract / write paths only.
-- Watcher tests use timing-sensitive sleeps; may flake on slow CI runners.
-- `community.compute_communities` is tested but the reindex_page edge cases (community ID stability across single-page edits) are not.
+`vault-engine status` reports vault path, cache dir, page count, embedding
+model, and skipped-page count with reasons. It does not report the engine
+version, graph node or edge counts, or a store fingerprint. HTTP request
+logging exists; per-channel timing on the retrieval hot path does not.
 
-### Embedder is bag-of-words on word-order and negation
+## Retrieval quality
 
-The default embedder (`mxbai-embed-large-v1`) scores near-duplicate text that differs only by word order or a flipped claim as highly similar. Measured on the adversarial fixtures:
+### The embedder is bag-of-words on word order and negation
 
-- **Word-swap** pairs (same words, reordered to change meaning): cosine **0.96–0.99**.
-- **Shuffle** pairs (sentence-order shuffled): cosine **0.94–0.99**.
-- **Negation** pairs ("X is safe" vs "X is not safe"): cosine **0.68–0.81** — closer, but still high enough that pure semantic ranking can surface the wrong polarity.
+The default embedder (`mxbai-embed-large-v1`) scores near-duplicate text
+that differs only by word order or a flipped claim as highly similar.
+Measured on `tests/fixtures/adversarial_bow.jsonl`:
 
-Consequence: semantic-only retrieval (and the INFERRED similarity edges, which use the same vectors) cannot reliably distinguish a statement from its negation or from a reordered variant. This is an inherent property of the model, not a bug in the engine. The router de-rates negation queries from pure `SEMANTIC` to `HYBRID` so a lexical/topology leg can disambiguate, but `HYBRID` today fuses vector + graph topology only — there is **no lexical (BM25/keyword) channel yet**, so the disambiguation is partial. A true lexical RRF channel is tracked for a future release. The adversarial fixtures (negation/word-swap/shuffle) exist as a regression gate so any embedder swap is measured against these axes before it lands.
+- **Word-swap** pairs (same words, reordered to change meaning): cosine
+  0.96 to 0.99.
+- **Shuffle** pairs (sentence-order shuffled): cosine 0.94 to 0.99.
+- **Negation** pairs ("X is safe" against "X is not safe"): cosine 0.68 to
+  0.81, lower, but still high enough that pure semantic ranking can surface
+  the wrong polarity.
+
+Semantic-only retrieval, and the INFERRED similarity edges that use the
+same vectors, therefore cannot reliably distinguish a statement from its
+negation or from a reordered variant. This is a property of the model, not
+a bug in the engine.
+
+Two mitigations are in the code. The router de-rates negation queries from
+`SEMANTIC` to `HYBRID`, and the BM25 lexical channel runs on every dispatch
+so a keyword leg can disambiguate. The mitigation is bounded by what
+keyword overlap can resolve: a negation pair shares nearly all its tokens,
+so BM25 helps most on word-order and word-choice cases and least on a bare
+polarity flip. Similarity edges in the `[threshold, 0.95)` band are
+annotated `AMBIGUOUS` rather than `INFERRED` so consumers can down-weight
+the range where these failures cluster.
+
+The adversarial fixtures are a regression gate: word-swap and shuffle are
+tracked as xfail, so any embedder swap is measured on these axes before it
+lands.
 
 ### Performance at very large vaults
 
-The matmul + BFS rewrites in v0.1.0 take the engine from "unusable above ~500 pages" to "usable at ~10k pages." Beyond ~50k chunks, sqlite-vec's brute-force MATCH becomes the bottleneck (see ADR 0001); ANN structures (faiss / hnswlib) would unblock that. Out of scope for v0.2.0 unless usage demands it.
+The matmul and BFS rewrites in v0.1.0, plus the page-vector cache in
+v0.2.0, take the engine from unusable above roughly 500 pages to usable at
+roughly 10k. Beyond roughly 50k chunks, sqlite-vec's brute-force MATCH
+becomes the bottleneck (see ADR 0001). ANN structures (faiss, hnswlib)
+would unblock that. Out of scope unless usage demands it.
+
+## Test coverage gaps
+
+- `url_ingester.fetch_url` has exactly one end-to-end test, covering the
+  cloud-metadata-IP refusal via a monkeypatched `getaddrinfo`. The success
+  path, the redirect chain, the content-type refusal, and the size cap are
+  covered only at the level of their helper functions, never through
+  `fetch_url` against a mocked HTTP transport.
+- Watcher tests use timing-sensitive sleeps (up to 0.3s) and may flake on
+  slow CI runners.
+- `community.compute_communities` is tested directly, and
+  `test_indexer_edge_type.py` asserts every node carries a community after
+  `reindex_page`. Community ID *stability* across a single-page edit is
+  still untested.
+
+## Documentation state
+
+Seven ADRs exist. Five are on `main` and accepted: sqlite-vec (0001),
+NetworkX (0002), the 0.85 INFERRED threshold (0003), router tiers (0004),
+and the mxbai default model (0005). Two are in flight on branches and not
+yet merged: 0006 source-coordinate preservation (Proposed) and 0007 the
+lexical RRF channel (Accepted). `docs/adr/README.md` indexes the five on
+`main`.
 
 ## Roadmap
 
-v0.2.0 ships when the architecture refactors (CLI uses Service, full GraphQuery facade) and the slug schema migration are done. Likely 2-3 weeks of focused work after v0.1.0 lands.
+The four items v0.1.0 named as v0.2.0 work (slug-schema migration, the
+Service-CLI refactor, the full GraphQuery facade, and observability polish)
+did not land in v0.2.0. v0.2.0 shipped the lexical channel, the reindex
+performance fix, concurrency hygiene, and a security backlog instead. Those
+four remain open and are described above. No date is attached to them,
+because the last estimate was wrong by about three months.
 
-v0.1.0 is honest-quality on security, correctness, performance at target scale, and the wedge claim (no external API, local-only, citation chains for auditable retrieval). The deferred items in this file are real — none are hidden.
+The deferred items in this file are real, and none are hidden.
