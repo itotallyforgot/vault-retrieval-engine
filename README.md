@@ -1,8 +1,14 @@
 # vault-engine
 
-Local semantic retrieval engine over personal markdown vaults. No external API. Citation chains for auditable retrieval.
+A bolt-on turbocharger for a markdown vault. Local-only retrieval, no external API, citation chains you can audit.
 
-A plug-in for markdown/Obsidian-style vaults — overlays retrieval, semantic search, and citation chains onto a vault that runs standalone without it. Works with any markdown vault that uses wikilinks; the vault remains the source of truth and the engine is best-effort enrichment.
+Your vault already works without this. Wikilinks, folders, maybe a hand-maintained `KNOWLEDGE_ROUTER.md` pointing at the good stuff. The trouble with an index like that is it only knows what you remembered to put in it.
+
+vault-engine bolts three retrieval channels onto the same files and fuses the results: semantic vector search, BM25 lexical search, and graph topology walked over both your explicit wikilinks and similarity edges the engine infers on its own. Every hit comes back with a citation chain from chunk to page to source, so grounding is auditable instead of assumed. Nothing leaves the machine.
+
+It pays off most in a dense, cross-domain vault, where the page you needed sits three hops away in a discipline you weren't searching. It isn't a large-corpus system. Personal-vault scale is the target, roughly 10k pages, and sqlite-vec's brute-force scan turns into the bottleneck somewhere past 50k chunks. Semantic ranking on its own also can't reliably separate a claim from its negation, which is the whole reason the lexical channel exists. See [Known issues](./KNOWN_ISSUES.md) for the measured numbers.
+
+The vault stays the source of truth. The engine is best-effort enrichment: turn it off and you still have your notes.
 
 ## Why
 
@@ -19,12 +25,14 @@ If you've decided cloud RAG is fine for your use case, this isn't the right tool
 ## What it does
 
 - **Semantic search** over markdown chunks using local SentenceTransformer embeddings (mxbai, nomic, or MiniLM).
+- **Lexical search:** BM25 over an FTS5 index of the same chunks. Always runs. This is the keyword and word-order leg, and it's what disambiguates the negation and word-swap cases the embedder can't (see [Known issues](./KNOWN_ISSUES.md)).
 - **Multi-hop graph walks** over wikilink edges plus inferred similarity edges (cosine threshold calibrated for vault topology).
-- **Citation chains** — each retrieved chunk traces back to its page and onward to source pages, producing a verifiable evidence trail.
-- **Watcher** — auto-reindex on filesystem changes, so newly-edited pages are queryable within seconds.
-- **Eval harness** — JSONL fixture runner with latency SLOs and page-coverage assertions. CI runs the eval against a mock embedder + sample vault.
-- **Service surfaces** — MCP stdio (Claude Code, Codex, Cursor) and HTTP/JSON (Tailscale) in addition to the CLI.
-- **No external API** — all retrieval, embedding, and storage is local. Embedding model loads from local Hugging Face cache.
+- **Rank fusion:** vector, lexical, and topology results are fused with reciprocal rank fusion, so a page that only one channel liked can still surface. Every hit reports which channels found it.
+- **Citation chains:** each retrieved chunk traces back to its page and onward to source pages, producing a verifiable evidence trail.
+- **Watcher:** auto-reindex on filesystem changes, so newly-edited pages are queryable within seconds.
+- **Eval harness:** JSONL fixture runner with latency SLOs and page-coverage assertions. CI runs the eval against a mock embedder + sample vault.
+- **Service surfaces:** MCP stdio (Claude Code, Codex, Cursor) and HTTP/JSON (Tailscale) in addition to the CLI.
+- **No external API:** all retrieval, embedding, and storage is local. Embedding model loads from local Hugging Face cache.
 
 ## Architecture
 
