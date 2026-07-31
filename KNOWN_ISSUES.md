@@ -60,7 +60,9 @@ The default embedder (`mxbai-embed-large-v1`) scores near-duplicate text that di
 - **Shuffle** pairs (sentence-order shuffled): cosine **0.94–0.99**.
 - **Negation** pairs ("X is safe" vs "X is not safe"): cosine **0.68–0.81** — closer, but still high enough that pure semantic ranking can surface the wrong polarity.
 
-Consequence: semantic-only retrieval (and the INFERRED similarity edges, which use the same vectors) cannot reliably distinguish a statement from its negation or from a reordered variant. This is an inherent property of the model, not a bug in the engine. The router de-rates negation queries from pure `SEMANTIC` to `HYBRID` so a lexical/topology leg can disambiguate, but `HYBRID` today fuses vector + graph topology only — there is **no lexical (BM25/keyword) channel yet**, so the disambiguation is partial. A true lexical RRF channel is tracked for a future release. The adversarial fixtures (negation/word-swap/shuffle) exist as a regression gate so any embedder swap is measured against these axes before it lands.
+Consequence: semantic-only retrieval (and the INFERRED similarity edges, which use the same vectors) cannot reliably distinguish a statement from its negation or from a reordered variant. This is an inherent property of the model, not a bug in the engine. The router de-rates negation queries from pure `SEMANTIC` to `HYBRID` so the lexical leg can disambiguate.
+
+**Update:** the lexical channel has since landed. BM25 over an FTS5 index of the same chunks (`stores/vec_store.py`) now runs on every `Router.dispatch`, fused with the vector and topology legs via RRF (`router.py`). Hits report their originating channels, e.g. `channels=lexical,vector`. The disambiguation described above is therefore no longer partial-by-absence, though it remains bounded by what keyword overlap can resolve: a negation pair shares nearly all its tokens, so BM25 helps most on word-order and word-choice cases and least on a bare polarity flip. The adversarial fixtures (negation/word-swap/shuffle) remain the regression gate so any embedder swap is measured against these axes before it lands.
 
 ### Performance at very large vaults
 
