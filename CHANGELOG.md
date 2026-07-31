@@ -96,6 +96,10 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 - The README documented the default cache directory as
   `~/.cache/vault-engine`. It is and always was `~/.cache/vault-retrieval`
   (`%APPDATA%/vault-retrieval` on Windows).
+- `search`, `expand`, and `source` no longer lose `[[wikilinks]]` from printed
+  vault content. `console.print` parsed them as rich markup tags and deleted
+  them, so an excerpt reading `Alpha references [[beta]]` on disk printed as
+  `Alpha references []`. Those three sites now print with `markup=False`.
 - Three rows of the README CLI table described commands that do not exist as
   written. Drift predating this change, corrected alongside it: `search` was
   documented as returning "citation chains" (it returns none; `POST /query`
@@ -104,6 +108,21 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
   `source` as resolving `wiki/topics/<page>` "to its source pages" (it takes
   a `wiki/sources/` slug and prints the single raw file named by that page's
   `raw_path`, verbatim; a topics page has no `raw_path` and exits 1).
+- `vault-engine add` no longer crashes when `--vault` points at a symlinked
+  root (`/tmp` resolves to `/private/tmp` on macOS). Both adapters return a
+  resolved path, so the closing `path.relative_to(vault)` raised
+  `ValueError` before printing anything. Pre-existing on the URL path too;
+  found by running the CLI rather than only the tests.
+- PDF pages with no extractable text layer are counted and reported rather
+  than silently dropped. `extract_pdf_markdown` / `add_pdf` take the same
+  optional `skipped: list[SkippedPage]` out-parameter `vault_reader.iter_pages`
+  takes, and `vault-engine add` prints `pages skipped (unreadable): N`
+  followed by one line per page, matching `status` and `reindex`. Before
+  this, a 4-page PDF with two image-only pages wrote `## p. 1` then
+  `## p. 4` and said nothing.
+- A failed page write no longer leaves the retained original behind. The
+  original is still written first so its own guards run before anything
+  lands, but it is removed if `write_raw_file` then fails.
 
 ### Added
 - Chunk identity survives the router and RRF (roadmap item 5). `RankedHit`
@@ -147,23 +166,6 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
   default to today's behaviour.
 - `pypdf` dependency (BSD-3-Clause, compatible with this repo's MIT
   licence). PyMuPDF was rejected: it is AGPL-3.0.
-
-### Fixed
-- `vault-engine add` no longer crashes when `--vault` points at a symlinked
-  root (`/tmp` resolves to `/private/tmp` on macOS). Both adapters return a
-  resolved path, so the closing `path.relative_to(vault)` raised
-  `ValueError` before printing anything. Pre-existing on the URL path too;
-  found by running the CLI rather than only the tests.
-- PDF pages with no extractable text layer are counted and reported rather
-  than silently dropped. `extract_pdf_markdown` / `add_pdf` take the same
-  optional `skipped: list[SkippedPage]` out-parameter `vault_reader.iter_pages`
-  takes, and `vault-engine add` prints `pages skipped (unreadable): N`
-  followed by one line per page, matching `status` and `reindex`. Before
-  this, a 4-page PDF with two image-only pages wrote `## p. 1` then
-  `## p. 4` and said nothing.
-- A failed page write no longer leaves the retained original behind. The
-  original is still written first so its own guards run before anything
-  lands, but it is removed if `write_raw_file` then fails.
 
 ### Security
 - A PDF with no extractable text layer is refused with an error naming the
