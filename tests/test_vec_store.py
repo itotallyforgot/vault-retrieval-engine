@@ -3,7 +3,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vault_engine.stores.vec_store import EmbeddingModelMismatch, VecStore
+from vault_engine.stores.vec_store import (
+    EmbeddingModelMismatch,
+    VaultPathMismatch,
+    VecStore,
+)
 
 
 def test_vec_store_upsert_and_search(tmp_path: Path):
@@ -237,5 +241,74 @@ def test_fts_index_updates_on_content_change(tmp_path: Path):
         store.upsert("alpha", 0, "replacedword here", "c2", -np.ones(8, dtype=np.float32))
         assert store.search_lexical("originalword") == []  # old text gone
         assert [h.page_slug for h in store.search_lexical("replacedword")] == ["alpha"]
+    finally:
+        store.close()
+
+
+def test_vec_store_stamps_vault_path_on_first_open(tmp_path: Path):
+    db = tmp_path / "v.db"
+    vault = tmp_path / "vault-a"
+    store = VecStore(db_path=db, dim=8, model_name="m1", vault_path=vault)
+    store.open()
+    try:
+        assert store._conn is not None
+        row = store._conn.execute("SELECT vault_path FROM store_meta WHERE singleton=1").fetchone()
+        assert row[0] == str(vault)
+    finally:
+        store.close()
+
+
+def test_vec_store_rejects_second_vault_sharing_one_cache(tmp_path: Path):
+    """The cross-vault leak, at the store layer.
+
+    Two vaults pointed at one embeddings.db used to silently share a corpus:
+    vault B's search returned vault A's chunk text. The store now refuses the
+    second vault instead of mixing them.
+    """
+    db = tmp_path / "v.db"
+    first = VecStore(db_path=db, dim=8, model_name="m1", vault_path=tmp_path / "vault-a")
+    first.open()
+    first.close()
+
+    second = VecStore(db_path=db, dim=8, model_name="m1", vault_path=tmp_path / "vault-b")
+    with pytest.raises(VaultPathMismatch) as e:
+        second.open()
+    # The message has to name both vaults and both escape hatches, or the user
+    # cannot tell a genuine second vault from a moved one.
+    assert str(tmp_path / "vault-a") in str(e.value)
+    assert str(tmp_path / "vault-b") in str(e.value)
+    assert "--cache" in str(e.value)
+    assert "--force" in str(e.value)
+
+
+def test_vec_store_adopts_pre_stamp_database(tmp_path: Path):
+    """A store built before the stamp existed adopts its current vault.
+
+    Existing users must not re-embed just because they upgraded.
+    """
+    db = tmp_path / "v.db"
+    old = VecStore(db_path=db, dim=8, model_name="m1")  # no vault_path: no stamp
+    old.open()
+    old.upsert("p", 0, "a", "csum-a", np.ones(8, dtype=np.float32))
+    old.close()
+
+    upgraded = VecStore(db_path=db, dim=8, model_name="m1", vault_path=tmp_path / "vault-a")
+    upgraded.open()
+    try:
+        assert upgraded.get_checksums("p") == {0: "csum-a"}  # nothing was wiped
+    finally:
+        upgraded.close()
+
+
+def test_vec_store_all_slugs(tmp_path: Path):
+    db = tmp_path / "v.db"
+    store = VecStore(db_path=db, dim=8, model_name="m1")
+    store.open()
+    try:
+        v = np.ones(8, dtype=np.float32)
+        store.upsert("p", 0, "a", "1", v)
+        store.upsert("p", 1, "b", "2", v)
+        store.upsert("q", 0, "c", "3", v)
+        assert store.all_slugs() == {"p", "q"}
     finally:
         store.close()

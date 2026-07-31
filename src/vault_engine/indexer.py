@@ -34,6 +34,10 @@ class IndexReport:
     # from the index. Surfaced loudly instead of silently swallowed (E4): the
     # paths feed a per-skip warning log, and ``pages_skipped`` is the count.
     pages_skipped: int = 0
+    # Slugs dropped from the store because the vault no longer has them —
+    # pages renamed or deleted while the engine was down. Reported the same
+    # way as ``pages_skipped``: counted, never silently swallowed.
+    pages_pruned: int = 0
     skipped: list[SkippedPage] = field(default_factory=list)
 
 
@@ -45,6 +49,7 @@ class Indexer:
             db_path=cfg.embeddings_db,
             dim=cfg.embedding_dim,
             model_name=cfg.embedding_model,
+            vault_path=cfg.vault_path,
         )
         self.graph: GraphStore = GraphStore()
         self._opened = False
@@ -143,7 +148,8 @@ class Indexer:
         """Re-read every page and re-index from scratch.
 
         Vec store: incremental — checksum-skip unchanged chunks WITHOUT
-        re-encoding (see _index_page_chunks).
+        re-encoding (see _index_page_chunks), then prune slugs the vault no
+        longer has.
         Graph: full rebuild — cheap at vault scale.
         Page-vector cache: rebuilt wholesale from the vec store.
         """
@@ -154,6 +160,13 @@ class Indexer:
             if chunks:
                 self._index_page_chunks(page.slug, chunks, report)
             report.pages_processed += 1
+
+        # Prune slugs the vault no longer has. Nothing else does this: a page
+        # renamed or deleted while the engine was down would otherwise stay
+        # indexed — and searchable, content and all — forever.
+        for stale in self.vec.all_slugs() - {p.slug for p in pages}:
+            self.vec.delete_page(stale)
+            report.pages_pruned += 1
 
         self.graph.rebuild(pages)
         # Repopulate the page-vector cache from the freshly-indexed store, then

@@ -1,11 +1,13 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 import vault_engine.vault_reader as vault_reader
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer, IndexReport
+from vault_engine.stores.vec_store import VaultPathMismatch
 
 
 class SpyEmbedder:
@@ -459,5 +461,72 @@ def test_reindex_page_cold_cache_still_emits_inferred_edges(tmp_path: Path):
             if d.get("relation") == "similarity"
         ]
         assert similarity, "cold-cache reindex emitted no similarity edges"
+    finally:
+        idx.close()
+
+
+def _one_page_vault(root: Path, name: str, body: str) -> Path:
+    vault = root / name
+    (vault / "wiki" / "topics").mkdir(parents=True)
+    (vault / "wiki" / "topics" / f"{name}-page.md").write_text(
+        f"---\ntitle: {name}\ntags: [topic]\nsources: []\nlast_updated: 2026-01-01\n---\n\n"
+        f"# {name}\n\n{body}\n",
+        encoding="utf-8",
+    )
+    return vault
+
+
+def test_second_vault_sharing_one_cache_is_refused(tmp_path: Path):
+    """Two vaults, one cache dir: the second open fails closed.
+
+    Before the vault stamp, vault B's index inherited every chunk vault A had
+    written to the same ``embeddings.db`` — searching B returned A's page
+    content as a top hit, with no citation chain to show where it came from.
+    """
+    cache = tmp_path / "cache"
+    vault_a = _one_page_vault(tmp_path, "vaulta", "CONFIDENTIAL merger with Initech.")
+    vault_b = _one_page_vault(tmp_path, "vaultb", "Public notes about gardening.")
+
+    cfg_a = EngineConfig(vault_path=vault_a, cache_dir=cache)
+    idx_a = Indexer(cfg=cfg_a, embedder=MockEmbedder(dim=cfg_a.embedding_dim))
+    idx_a.open()
+    try:
+        idx_a.rebuild()
+    finally:
+        idx_a.close()
+
+    cfg_b = EngineConfig(vault_path=vault_b, cache_dir=cache)
+    idx_b = Indexer(cfg=cfg_b, embedder=MockEmbedder(dim=cfg_b.embedding_dim))
+    with pytest.raises(VaultPathMismatch):
+        idx_b.open()
+
+
+def test_rebuild_prunes_pages_deleted_while_the_engine_was_down(sample_vault: Path, tmp_path: Path):
+    """A page removed from disk between runs must leave the index.
+
+    ``delete_page`` was only reachable from ``reindex_page`` on a live watcher
+    event, so a rename or delete performed while the engine was down left the
+    old slug searchable forever — content included.
+    """
+    cfg = EngineConfig(vault_path=sample_vault, cache_dir=tmp_path / "cache")
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        assert "beta" in idx.vec.all_slugs()
+
+        (sample_vault / "wiki" / "topics" / "beta.md").unlink()
+        report = idx.rebuild()
+
+        assert report.pages_pruned == 1
+        assert "beta" not in idx.vec.all_slugs()
+        # chunk_meta is not the only table holding chunk text: the FTS index
+        # would keep serving the deleted page over the lexical channel.
+        assert idx.vec._conn is not None
+        fts_slugs = {
+            row[0] for row in idx.vec._conn.execute("SELECT DISTINCT page_slug FROM chunks_fts")
+        }
+        assert "beta" not in fts_slugs
+        assert all(h.page_slug != "beta" for h in idx.vec.search_lexical("Beta only", top_k=10))
     finally:
         idx.close()

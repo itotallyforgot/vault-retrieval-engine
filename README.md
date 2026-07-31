@@ -144,7 +144,7 @@ Tool surface:
 uv run vault-engine serve --vault ~/Projects/your-vault
 ```
 
-Bind to the tailnet IP and require a token via `EngineConfig` (`http_bind_addr`, `http_port`, `http_token`) or env vars (`VAULT_ENGINE_BIND_ADDR`, `VAULT_ENGINE_HTTP_PORT`, `VAULT_ENGINE_HTTP_TOKEN`, `VAULT_ENGINE_CACHE_DIR`). Env-var precedence is `env-var > function-arg > dataclass-default`; the launchd plist and NSSM service both rely on this so the install scripts can fully configure the engine without a TOML file.
+Bind to the tailnet IP and require a token via `EngineConfig` (`http_bind_addr`, `http_port`, `http_token`) or env vars (`VAULT_ENGINE_BIND_ADDR`, `VAULT_ENGINE_HTTP_PORT`, `VAULT_ENGINE_HTTP_TOKEN`, `VAULT_ENGINE_CACHE_DIR`). Env-var precedence is `env-var > function-arg > dataclass-default`, except `cache_dir`, where an explicit `--cache` flag wins over the env var; the launchd plist and NSSM service both rely on this so the install scripts can fully configure the engine without a TOML file.
 
 For long-lived service mode see `docs/windows-service.md` (PC, NSSM) and the new macOS path:
 
@@ -191,7 +191,7 @@ Common knobs:
 | Setting | Default | Env var | Notes |
 |---|---|---|---|
 | `vault_path` | `--vault` flag required | — | The directory containing `wiki/` and `raw/` |
-| `cache_dir` | `~/.cache/vault-engine` | `VAULT_ENGINE_CACHE_DIR` | Embedding cache + vec DB (`embeddings.db`) |
+| `cache_dir` | `~/.cache/vault-retrieval` (`%APPDATA%/vault-retrieval` on Windows) | `VAULT_ENGINE_CACHE_DIR` | Embedding cache + vec DB (`embeddings.db`). **One cache directory holds one vault.** The store records the vault it was built from and refuses to open from another; give a second vault its own `--cache <dir>`. |
 | `embedding_model` | `mxbai-embed-large-v1` | — | Or `nomic-embed-text-v1.5`, `all-MiniLM-L6-v2` |
 | `inferred_threshold` | `0.85` | — | Cosine threshold for INFERRED graph edges |
 | `http_bind_addr` | `127.0.0.1` | `VAULT_ENGINE_BIND_ADDR` | HTTP server bind interface (private by default) |
