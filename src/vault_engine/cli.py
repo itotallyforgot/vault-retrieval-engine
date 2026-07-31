@@ -177,7 +177,10 @@ def search(query: str = typer.Argument(...), k: int = typer.Option(10, "-k")) ->
                 f"[cyan]{hit.doc_id}[/cyan] #{chunk} rrf={hit.rrf_score:.4f} channels={channels}"
             )
             # Topology hits walk pages, not chunks, so they name no excerpt.
-            console.print((hit.content or "(no chunk text: topology hit)")[:200].replace("\n", " "))
+            console.print(
+                (hit.content or "(no chunk text: topology hit)")[:200].replace("\n", " "),
+                markup=False,
+            )
             console.print("---")
     finally:
         idx.close()
@@ -193,7 +196,9 @@ def expand(slug: str = typer.Argument(...)) -> None:
         if body is None:
             console.print(f"[red]not found[/red]: {slug}")
             raise typer.Exit(code=1)
-        console.print(body)
+        # markup=False: vault bodies contain [[wikilinks]], which rich would
+        # parse as markup tags and silently delete.
+        console.print(body, markup=False)
     finally:
         idx.close()
 
@@ -208,7 +213,8 @@ def source(slug: str = typer.Argument(...)) -> None:
         if text is None:
             console.print(f"[yellow]no raw source for[/yellow]: {slug}")
             raise typer.Exit(code=1)
-        console.print(text)
+        # markup=False: raw sources contain [[wikilinks]] and bracketed text.
+        console.print(text, markup=False)
     finally:
         idx.close()
 

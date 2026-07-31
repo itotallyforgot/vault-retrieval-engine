@@ -12,10 +12,11 @@ assertions below were rewritten in that PR; the `expand` and `source`
 assertions were not touched, which is the diff saying that only `search`
 changed for a user.
 
-Anything asserted here is a statement of fact about the current build. Where the
-current behavior is a defect (rich markup eating `[[wikilinks]]` out of every
-excerpt and page body, see the `_wikilink` tests below), the test says so in
-place rather than quietly asserting the correct-looking thing.
+Anything asserted here is a statement of fact about the current build. Where a
+test pinned a defect rather than desired behavior, it said so in place rather
+than quietly asserting the correct-looking thing. The rich-markup swallow that
+ate `[[wikilinks]]` out of excerpts and page bodies was pinned that way and has
+since been fixed; those tests now assert the links survive.
 """
 
 from pathlib import Path
@@ -121,16 +122,18 @@ def test_search_still_emits_no_citation_chain(tmp_path):
     assert "citation" not in result.stdout.lower()
 
 
-def test_search_excerpt_drops_wikilinks_to_rich_markup(tmp_path):
-    """DEFECT, pinned: `console.print` treats `[[beta]]` as rich markup.
+def test_search_excerpt_keeps_wikilinks(tmp_path):
+    """Excerpts print verbatim, wikilinks included.
 
-    The alpha excerpt reads "Alpha references [[beta]] and ..." on disk and
-    "Alpha references [] and ..." on screen. Not introduced by this work; pinned
-    so a future fix is a visible diff instead of an accident.
+    `console.print` parses `[[beta]]` as a rich markup tag and deletes it, so
+    the alpha excerpt used to read "Alpha references [] and ..." on screen
+    while reading "Alpha references [[beta]] and ..." on disk. The links are
+    the relational structure this engine exists to expose, so eating them in
+    the one surface a human reads was the wrong default. Printed with
+    markup=False now.
     """
     result = _run(tmp_path, "search", "alpha protocol", "-k", "3")
-    assert "Alpha references [] and is described by alpha-thing" in result.stdout
-    assert "[[beta]]" not in result.stdout
+    assert "Alpha references [[beta]] and is described by alpha-thing" in result.stdout
 
 
 def test_search_honors_k(tmp_path):
@@ -160,11 +163,10 @@ def test_expand_prints_the_page_body_not_a_graph_walk(tmp_path):
     assert "last_updated" not in result.stdout
 
 
-def test_expand_body_drops_wikilinks_to_rich_markup(tmp_path):
-    """DEFECT, pinned: same rich-markup swallow as the search excerpt."""
+def test_expand_body_keeps_wikilinks(tmp_path):
+    """Page bodies print verbatim. Same fix as the search excerpt."""
     result = _run(tmp_path, "expand", "alpha")
-    assert "Alpha references [] and is described by alpha-thing" in result.stdout
-    assert "[[beta]]" not in result.stdout
+    assert "Alpha references [[beta]] and is described by alpha-thing" in result.stdout
 
 
 def test_expand_unknown_slug_exits_1(tmp_path):
