@@ -71,3 +71,39 @@ def test_cli_eval_embedder_mock_does_not_initialize_default_model(
 
     assert result.exit_code == 0, result.output
     assert "passed: 1" in result.stdout
+
+
+def test_cli_add_routes_local_pdf_to_pdf_ingester(tmp_path):
+    from pathlib import Path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    fixture = Path(__file__).parent / "fixtures" / "two_page.pdf"
+    result = runner.invoke(app, ["add", str(fixture), "--vault", str(vault)])
+    assert result.exit_code == 0, result.stdout
+    assert "two-page.md" in result.stdout
+    assert (vault / "raw" / "_originals").is_dir()
+
+
+def test_cli_add_reports_pdf_error_without_traceback(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    result = runner.invoke(app, ["add", str(tmp_path / "missing.pdf"), "--vault", str(vault)])
+    assert result.exit_code == 1
+    assert "Error:" in result.stderr
+
+
+def test_cli_add_reports_relative_path_through_symlinked_vault(tmp_path):
+    """A symlinked vault root (/tmp -> /private/tmp on macOS) used to crash the
+    relative-path echo, because both adapters return a resolved path."""
+    from pathlib import Path
+
+    real = tmp_path / "real_vault"
+    real.mkdir()
+    link = tmp_path / "vault_link"
+    link.symlink_to(real, target_is_directory=True)
+    fixture = Path(__file__).parent / "fixtures" / "two_page.pdf"
+
+    result = runner.invoke(app, ["add", str(fixture), "--vault", str(link)])
+    assert result.exit_code == 0, result.stdout
+    assert result.stdout.startswith("Wrote raw/")

@@ -9,7 +9,43 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- Local-file PDF ingestion. `vault-engine add ./paper.pdf --vault <path>`
+  extracts a PDF's text layer with `pypdf` and writes `raw/<slug>.md` with
+  one `## p. N` section per text-bearing page. Page markers are ordinary H2
+  headings, so `chunker.chunk_page` (which splits on H1/H2 and keeps the
+  heading line in the chunk text) carries them into the vector store and the
+  FTS index with no schema change. `add` routes an `http(s)` argument to the
+  existing URL adapter and anything else to the PDF adapter; there is no
+  remote PDF fetch, which keeps the SSRF surface `url_ingester` closes shut.
+- ADR 0006 artifact retention, implemented for PDFs. The source file is
+  copied to `raw/_originals/<slug>.pdf` and the generated page records
+  `source_artifact`, `source_sha256`, and `source_media_type` in
+  frontmatter, so a citation chain can name the original a claim descends
+  from and that claim is checkable. `url_ingester.write_raw_file` grew
+  `source_type` and `extra_frontmatter` parameters to render these; both
+  default to today's behaviour.
+- `pypdf` dependency (BSD-3-Clause, compatible with this repo's MIT
+  licence). PyMuPDF was rejected: it is AGPL-3.0.
+
+### Fixed
+- `vault-engine add` no longer crashes when `--vault` points at a symlinked
+  root (`/tmp` resolves to `/private/tmp` on macOS). Both adapters return a
+  resolved path, so the closing `path.relative_to(vault)` raised
+  `ValueError` before printing anything. Pre-existing on the URL path too;
+  found by running the CLI rather than only the tests.
+
+### Security
+- A PDF with no extractable text layer is refused with an error naming the
+  file, rather than ingested as an empty page. There is no OCR.
+- The retained-original copy carries the same traversal guard as
+  `write_raw_file`: the resolved destination must stay inside
+  `raw/_originals/`, which also refuses a symlinked destination pointing out
+  of the vault. Input size is capped at 10 MiB, matching
+  `vault_reader._MAX_PAGE_BYTES`.
+- Retaining an original never silently overwrites an existing one, because
+  that would invalidate the `source_sha256` already recorded by whichever
+  page retained it. Pass `--overwrite` to replace.
 
 ## [0.2.0] - 2026-07-30
 
