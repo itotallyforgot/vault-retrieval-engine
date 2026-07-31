@@ -9,6 +9,52 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
+### Changed
+- **`vault-engine search` now runs all three retrieval channels, and its
+  output changed to say so.** This is a user-visible change to a released
+  command. The project is 0.x, so SemVer permits it; the reasoning is below
+  rather than left implicit.
+  - *What changed in the evidence base.* `cli.search` built a `Retrieval` and
+    called `Retrieval.search`, which encodes the query and calls `vec.search`,
+    the vector channel and nothing else. It now builds a `Router` from the
+    already-open `Indexer` and calls `Router.dispatch`, which fans out to
+    vector, lexical (BM25), and topology, and fuses with RRF. That is the
+    same path `POST /query` has always used, and the same path `EvalRunner`
+    has always measured. Three surfaces, one answer.
+  - *What changed on screen.* The per-hit header was
+    `<slug> #<chunk_idx> dist=<float>`. It is now
+    `<slug> #<chunk_idx> rrf=<float> channels=<csv>`. `dist=` is gone: a raw
+    embedding distance describes one channel, and there are three now, so
+    reporting it as *the* score would misstate what produced the hit. `rrf=`
+    is the fused score; `channels=` names which of `vector`, `lexical`, and
+    `topology` contributed, deduped and in fusion order. The chunk index and
+    the chunk excerpt both survive unchanged, because the excerpt is what
+    makes `search` readable in a terminal. A page that only the topology
+    channel found has no chunk to name, and prints `#-` with an explicit
+    `(no chunk text: topology hit)` in place of a fabricated excerpt.
+  - *Why now.* The CLI was quietly the weakest of the three surfaces while
+    the README described the engine as three-channel. Chunk identity through
+    the router (below) is what made the move lossless: `Router.dispatch` can
+    now supply the chunk index and chunk text that `search` was already
+    printing, so nothing had to be dropped to gain the extra channels.
+  - Ranking moves, because the evidence base moved. On the fixture vault,
+    `search "alpha protocol"` returned `zeta, alpha, gamma` and now returns
+    `alpha, zeta, gamma`. The eval rig is unaffected (still 6/6): it was
+    already calling `Router.dispatch` and was never measuring the CLI path.
+  - No `Service` method was added, no lifecycle mode was added, and
+    `Retrieval` is untouched. `status`, `reindex`, `expand`, and `source` are
+    untouched.
+
+### Fixed
+- Three rows of the README CLI table described commands that do not exist as
+  written. Drift predating this change, corrected alongside it: `search` was
+  documented as returning "citation chains" (it returns none; `POST /query`
+  is the surface that assembles them), `expand` as a "Multi-hop graph walk
+  from a seed page" (it prints one page's body and walks nothing), and
+  `source` as resolving `wiki/topics/<page>` "to its source pages" (it takes
+  a `wiki/sources/` slug and prints the single raw file named by that page's
+  `raw_path`, verbatim; a topics page has no `raw_path` and exits 1).
+
 ### Added
 - Chunk identity survives the router and RRF (roadmap item 5). `RankedHit`
   and `FusedHit` gained `chunk_idx` / `content`, and `FusedHit` gained

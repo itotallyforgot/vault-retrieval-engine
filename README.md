@@ -99,9 +99,9 @@ The `mock` embedder is fast and deterministic for iteration. Switch to `sentence
 |---|---|
 | `vault-engine status` | Show vault path, vec store stats, graph stats, last reindex |
 | `vault-engine reindex [--force]` | Rebuild the index from the vault. Encode-skip on unchanged chunks. |
-| `vault-engine search <query> [--k N]` | Top-k semantic results with citation chains |
-| `vault-engine expand <wikilink>` | Multi-hop graph walk from a seed page |
-| `vault-engine source <page>` | Resolve `wiki/topics/<page>` → its source pages |
+| `vault-engine search <query> [--k N]` | Top-k fused results (vector + lexical BM25 + topology, merged by RRF). Prints each hit's chunk index, RRF score, contributing channels, and a chunk excerpt. No citation chains; use `POST /query` for those. |
+| `vault-engine expand <page>` | Print one page's body, frontmatter stripped. No graph walk. |
+| `vault-engine source <source-page>` | Print the raw file named by that source page's `raw_path`, verbatim. Takes a `wiki/sources/` slug; a `wiki/topics/` page has no `raw_path` and exits 1. |
 | `vault-engine eval --fixtures <path> [--embedder mock\|default]` | Run the JSONL fixture eval; assert latency + page-coverage |
 | `vault-engine add <url> --vault <path>` | One-shot scrape a URL into `raw/` (trafilatura extraction). Note: `add`, `serve`, `mcp`, and `hook` define their own `--vault` flag; placement matters. |
 | `vault-engine add <file.pdf> --vault <path>` | One-shot ingest a local PDF into `raw/`, one `## p. N` section per page (pypdf text layer). Retains the original at `raw/_originals/<slug>.pdf`. Local files only; no remote PDF fetch. |
@@ -349,4 +349,4 @@ MIT. See [LICENSE](LICENSE).
 
 **v0.1.0** (2026-05-04, tag `v0.1.0`) shipped encode-skip, INFERRED edges, the NSSM Windows service, the post-commit auto-reindex hook, the URL to `raw/` adapter, and ripgrep fallback.
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: no PDF or non-markdown ingestion, no chunk size cap, and the CLI still runs vector-only search while the HTTP and MCP surfaces run all three channels.
+See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: no PDF or non-markdown ingestion, and no chunk size cap. The third one named here, the CLI running vector-only search while the HTTP and MCP surfaces ran all three channels, is closed on `main` and not yet in a tagged release.

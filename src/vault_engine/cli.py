@@ -17,6 +17,7 @@ from vault_engine.embedder import (
 )
 from vault_engine.indexer import Indexer
 from vault_engine.retrieval import Retrieval
+from vault_engine.router import Router
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 console = Console()
@@ -151,14 +152,32 @@ def reindex(
 
 @app.command()
 def search(query: str = typer.Argument(...), k: int = typer.Option(10, "-k")) -> None:
-    """Top-k semantic search against the vault."""
+    """Top-k fused search: vector + lexical BM25 + topology, merged by RRF.
+
+    Same evidence base as `POST /query` — both go through `Router.dispatch`.
+    The Router is built from the already-open Indexer's stores, exactly as
+    `EvalRunner.__init__` builds it, so all three surfaces measure the same
+    thing.
+    """
     idx = _open_indexer()
     try:
         idx.rebuild()  # ensures fresh state when run ad-hoc; cheap at vault scale
-        r = Retrieval(cfg=idx.cfg, indexer=idx, embedder=idx.embedder)
-        for hit in r.search(query, k=k):
-            console.print(f"[cyan]{hit.page_slug}[/cyan] #{hit.chunk_idx} dist={hit.distance:.4f}")
-            console.print(hit.content[:200].replace("\n", " "))
+        router = Router(
+            cfg=idx.cfg,
+            embedder=idx.embedder,
+            vec_store=idx.vec,
+            graph_store=idx.graph,
+        )
+        for hit in router.dispatch(query, top_k=k)["fused_hits"]:
+            # A page can rank in several of a channel's chunks; dict.fromkeys
+            # dedupes while keeping channel order (vector, lexical, topology).
+            channels = ",".join(dict.fromkeys(hit.channels))
+            chunk = "-" if hit.chunk_idx is None else str(hit.chunk_idx)
+            console.print(
+                f"[cyan]{hit.doc_id}[/cyan] #{chunk} rrf={hit.rrf_score:.4f} channels={channels}"
+            )
+            # Topology hits walk pages, not chunks, so they name no excerpt.
+            console.print((hit.content or "(no chunk text: topology hit)")[:200].replace("\n", " "))
             console.print("---")
     finally:
         idx.close()
