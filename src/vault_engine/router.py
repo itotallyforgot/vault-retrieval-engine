@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from vault_engine.config import EngineConfig
     from vault_engine.embedder import Embedder
     from vault_engine.stores.graph_store import GraphStore
-    from vault_engine.stores.vec_store import VecStore
+    from vault_engine.stores.vec_store import VecHit, VecStore
 
 
 class QueryMode(StrEnum):
@@ -197,6 +197,11 @@ class Router:
             lexical_hits  – list[RankedHit] from FTS5/BM25 (up to top_k)
             topology_hits – list[RankedHit] from graph walk (up to top_k; [] if skipped)
             fused_hits    – list[FusedHit] after RRF merge (up to top_k)
+
+        Every hit names the chunk it came from where one exists (``chunk_idx``
+        / ``content``); topology hits are page-level and leave both ``None``.
+        Fusion itself is unchanged: it still accumulates on the page slug, so
+        chunk identity is carried, never used as a fusion key.
         """
         intent = self._classify(query)
 
@@ -231,6 +236,11 @@ class Router:
                     rrf_score=h.score,
                     channels=[h.channel],
                     per_channel_scores={h.channel: h.score},
+                    chunk_idx=h.chunk_idx,
+                    content=h.content,
+                    per_channel_chunks=(
+                        {h.channel: h.chunk_idx} if h.chunk_idx is not None else {}
+                    ),
                 )
                 for h in only[:top_k]
             ]
@@ -262,14 +272,25 @@ class Router:
                 known_titles.update(str(alias) for alias in aliases)
         return classify(query, known_titles=known_titles)
 
-    def _vector_search(self, query: str, *, top_k: int) -> list:
-        """Run KNN search and return list[RankedHit]."""
+    def _vector_search(self, query: str, *, top_k: int) -> list[RankedHit]:
+        """Run KNN search and return list[RankedHit], one per matching chunk.
+
+        ``doc_id`` stays the page slug (fusion is page-level); the chunk that
+        actually matched rides along on ``chunk_idx`` / ``content``.
+        """
         # MockEmbedder / SentenceTransformerEmbedder both expose .encode(list[str]).
         emb = self.embedder.encode([query])[0]
-        # VecStore.search returns list[VecHit]; each has .page_slug and .distance.
+        # VecStore.search returns list[VecHit]; each names its chunk.
         raw = self.vec_store.search(emb, top_k=top_k)
         return [
-            RankedHit(doc_id=hit.page_slug, score=hit.distance, channel="vector") for hit in raw
+            RankedHit(
+                doc_id=hit.page_slug,
+                score=hit.distance,
+                channel="vector",
+                chunk_idx=hit.chunk_idx,
+                content=hit.content,
+            )
+            for hit in raw
         ]
 
     def _lexical_search(self, query: str, *, top_k: int) -> list[RankedHit]:
@@ -277,16 +298,27 @@ class Router:
 
         Dedupes to the best (lowest BM25 score) chunk per page so a page that
         matches in several chunks doesn't flood the channel — the channel ranks
-        pages, mirroring how the vector channel is consumed downstream.
+        pages, mirroring how the vector channel is consumed downstream. The
+        surviving chunk's identity is kept on the hit, so "best chunk per page"
+        stays inspectable instead of collapsing to a bare slug.
         """
         raw = self.vec_store.search_lexical(query, top_k=top_k * 2)
-        best_by_page: dict[str, float] = {}
+        best_by_page: dict[str, VecHit] = {}
         for hit in raw:
             prev = best_by_page.get(hit.page_slug)
-            if prev is None or hit.distance < prev:
-                best_by_page[hit.page_slug] = hit.distance
-        ranked = sorted(best_by_page.items(), key=lambda kv: kv[1])[:top_k]
-        return [RankedHit(doc_id=slug, score=score, channel="lexical") for slug, score in ranked]
+            if prev is None or hit.distance < prev.distance:
+                best_by_page[hit.page_slug] = hit
+        ranked = sorted(best_by_page.values(), key=lambda h: h.distance)[:top_k]
+        return [
+            RankedHit(
+                doc_id=hit.page_slug,
+                score=hit.distance,
+                channel="lexical",
+                chunk_idx=hit.chunk_idx,
+                content=hit.content,
+            )
+            for hit in ranked
+        ]
 
     def _infer_seed(self, vector_hits: list) -> str | None:
         """Return the top vector hit's doc_id if it exists in the graph, else None."""

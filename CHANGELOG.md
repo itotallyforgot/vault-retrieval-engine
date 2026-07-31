@@ -10,6 +10,30 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 ## [Unreleased]
 
 ### Added
+- Chunk identity survives the router and RRF (roadmap item 5). `RankedHit`
+  and `FusedHit` gained `chunk_idx` / `content`, and `FusedHit` gained
+  `per_channel_chunks`. `Router._vector_search` was discarding the
+  `chunk_idx` and `content` that `VecHit` already carried, and
+  `_lexical_search` was collapsing its best-chunk-per-page dedupe to a bare
+  slug, so nothing downstream of the router could say which chunk matched —
+  only which page. This is the prerequisite the roadmap named for
+  chunk-level provenance (source coordinates) reaching a transport, and for
+  the CLI moving onto `Service` (`vault-engine search` prints a chunk index
+  and chunk text that `Service.query` could not supply).
+  - Fusion is unchanged: RRF still accumulates on the page slug. Chunk
+    identity is carried on the hit and never used as a fusion key, so the
+    ranking is byte-identical (verified by diffing the fused ranking for
+    every eval fixture query before and after; the eval rig stays 6/6).
+  - When channels disagree about which chunk matched a page, the fused hit
+    reports the chunk from the single best-ranked channel contribution, and
+    `per_channel_chunks` keeps every channel's pick so the disagreement is
+    inspectable rather than discarded. Rank ties break on channel order
+    (vector, lexical, topology), which makes the pick deterministic.
+  - Topology hits are page-level and report `chunk_idx = None` rather than a
+    fabricated 0.
+  - `POST /query` gained two additive keys per fused hit, `chunk_idx` and
+    `per_channel_chunks`. No existing key changed; `content` is deliberately
+    not returned over HTTP.
 - Local-file PDF ingestion. `vault-engine add ./paper.pdf --vault <path>`
   extracts a PDF's text layer with `pypdf` and writes `raw/<slug>.md` with
   one `## p. N` section per text-bearing page. Page markers are ordinary H2

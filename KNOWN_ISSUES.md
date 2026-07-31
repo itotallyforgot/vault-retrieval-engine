@@ -227,9 +227,16 @@ Ordering, and the constraint that forces it:
    retention. The coordinates ADR should be written against what the PDF
    extractor actually emits, now that one exists. The first draft of 0006 was
    refuted precisely because it designed the storage before the producer.
-5. **Chunk identity through the router.** `Router._vector_search` discards
-   `chunk_idx`, so no chunk-level provenance can reach a transport regardless
-   of how it is stored. This is a prerequisite for (4), not a follow-on.
+   Its prerequisite (chunk identity, item 5) is no longer in the way.
+5. **Chunk identity through the router.** Landed on `main`, unreleased.
+   `RankedHit` and `FusedHit` now carry `chunk_idx` / `content`, and
+   `FusedHit` carries `per_channel_chunks` for the case where channels
+   disagree about which chunk matched a page. Fusion still accumulates on the
+   page slug, so no ranking moved. What this does *not* yet do: the chunk
+   identity is an index and the chunk text, not a source coordinate — there
+   is still no page number, byte offset, or line range on a chunk, because
+   nothing stores one (see item 4). `mcp_server.py` also does not surface the
+   new fields yet; `POST /query` does.
 
 Not scheduled, with reasons rather than vague deferral:
 

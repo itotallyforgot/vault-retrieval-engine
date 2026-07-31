@@ -166,3 +166,70 @@ def test_router_lexical_dedupes_to_best_chunk_per_page(populated_stores):
     result = router.dispatch("auth")
     docs = [h.doc_id for h in result["lexical_hits"]]
     assert docs.count("topic-a") == 1  # deduped despite 3 matching chunks
+
+
+# --- chunk identity through the router (roadmap item 5) ---
+
+
+def _add_chunks(vec, embedder, slug, chunks):
+    import hashlib
+
+    for idx, text in chunks:
+        emb = embedder.encode([text])[0]
+        vec.upsert(slug, idx, text, hashlib.sha256(text.encode()).hexdigest(), emb)
+
+
+def test_vector_channel_names_its_chunk(populated_stores):
+    """The vector channel must not collapse a chunk hit to a bare page slug."""
+    cfg, embedder, vec, graph = populated_stores
+    _add_chunks(vec, embedder, "topic-a", [(1, "webauthn hardware key")])
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    hits = router.dispatch("webauthn hardware key")["vector_hits"]
+    top = hits[0]
+    assert top.doc_id == "topic-a"
+    assert top.chunk_idx == 1, "vector channel dropped chunk_idx"
+    assert top.content == "webauthn hardware key"
+
+
+def test_lexical_channel_names_the_chunk_it_kept(populated_stores):
+    """Dedupe keeps one chunk per page — that chunk's identity survives."""
+    cfg, embedder, vec, graph = populated_stores
+    _add_chunks(vec, embedder, "topic-a", [(1, "auth"), (2, "unrelated filler text")])
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    lexical = router.dispatch("auth")["lexical_hits"]
+    hit = next(h for h in lexical if h.doc_id == "topic-a")
+    # chunk 1 is "auth" alone (shortest matching chunk -> best BM25), chunk 0 is
+    # "auth mfa"; either is a real chunk of the page, neither may be None.
+    assert hit.chunk_idx in (0, 1)
+    assert hit.content is not None and "auth" in hit.content
+
+
+def test_topology_hits_have_no_chunk(populated_stores):
+    """Topology ranks pages. It must report no chunk rather than a fake one."""
+    cfg, embedder, vec, graph = populated_stores
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    topo = router.dispatch("auth mfa", seed_node="topic-a")["topology_hits"]
+    assert topo
+    assert all(h.chunk_idx is None and h.content is None for h in topo)
+
+
+def test_chunk_identity_survives_fusion(populated_stores):
+    """End to end: a fused hit still knows which chunk matched."""
+    cfg, embedder, vec, graph = populated_stores
+    _add_chunks(vec, embedder, "topic-a", [(1, "webauthn hardware key")])
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    fused = router.dispatch("webauthn hardware key")["fused_hits"]
+    hit = next(h for h in fused if h.doc_id == "topic-a")
+    assert hit.chunk_idx == 1
+    assert hit.content == "webauthn hardware key"
+    assert hit.per_channel_chunks
+
+
+def test_fused_hits_stay_page_keyed(populated_stores):
+    """Carrying chunk identity must not turn RRF into chunk-level fusion:
+    a page matching in several chunks still yields one multi-channel fused hit."""
+    cfg, embedder, vec, graph = populated_stores
+    _add_chunks(vec, embedder, "topic-a", [(1, "auth again"), (2, "auth once more")])
+    router = Router(cfg=cfg, embedder=embedder, vec_store=vec, graph_store=graph)
+    fused = router.dispatch("auth mfa related to topic-a", seed_node="topic-a")["fused_hits"]
+    assert [h.doc_id for h in fused].count("topic-a") == 1

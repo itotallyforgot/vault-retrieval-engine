@@ -96,7 +96,8 @@ This pulls out the `fused_hits` array from the response shape:
 {
   "intent": "semantic",
   "fused_hits": [
-    {"doc_id": "...", "rrf_score": 0.42, "channels": ["vector"], "per_channel_scores": {...}},
+    {"doc_id": "...", "rrf_score": 0.42, "channels": ["vector"], "per_channel_scores": {...},
+     "chunk_idx": 3, "per_channel_chunks": {"vector": 3}},
     ...
   ]
 }
