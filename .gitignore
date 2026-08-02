@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 *.egg-info/
+dist/
 .pytest_cache/
 .coverage
 .venv/

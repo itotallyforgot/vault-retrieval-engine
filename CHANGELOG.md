@@ -9,7 +9,23 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
+### Changed
+- Distribution name is now `vault-retrieval-engine`. `vault-engine` was
+  already taken on PyPI by an unrelated project, so the old name could never
+  have been published. The import package (`vault_engine`) and the console
+  script (`vault-engine`) are unchanged — nothing about installed usage
+  differs. Neither name is published to PyPI yet; install is still from
+  source.
+
 ### Fixed
+- `vault-engine hook install` no longer crashes when run from an installed
+  package. `_vault_assets/` lived at the repo root, outside `src/`, so
+  hatchling never shipped it in the wheel, and the CLI resolved it by walking
+  `parents[2]` from the module — which lands in `lib/python3.x/` once
+  installed, not in a source checkout. The assets now live inside the package
+  at `src/vault_engine/_vault_assets/` and resolve relative to the module, so
+  the wheel is correct by construction. Only running from a git checkout ever
+  worked before.
 - `vault-engine source <slug>` no longer reports `no raw source` for a page
   the engine itself created. `add_pdf` writes ADR 0006's `source_artifact` /
   `source_sha256` / `source_media_type`; `Retrieval.source` read only

@@ -434,8 +434,7 @@ def hook_install(
     dry_run: bool = typer.Option(False, help="Print intended writes, do nothing"),
 ) -> None:
     """Install PreToolUse hook into <vault>/.claude/settings.json (E1)."""
-    repo_root = Path(__file__).resolve().parents[2]
-    src_assets = repo_root / "_vault_assets"
+    src_assets = Path(__file__).resolve().parent / "_vault_assets"
     settings_path = vault / ".claude" / "settings.json"
     hooks_dir = vault / ".claude" / "hooks"
 
