@@ -9,6 +9,8 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-02
+
 ### Changed
 - Distribution name is now `vault-retrieval-engine`. `vault-engine` was
   already taken on PyPI by an unrelated project, so the old name could never
@@ -18,6 +20,13 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
   source.
 
 ### Fixed
+- Following the quick start no longer breaks the engine on your own vault.
+  v0.3.0 made a cache directory belong to one vault and refuse to open for
+  another, but the README still told a new user to index
+  `tests/fixtures/sample_vault` with no `--cache`. That claimed their default
+  cache for the fixture vault, so pointing the engine at their own vault
+  afterwards was refused. The quick start, the development eval command, and
+  CI's eval step now pass an explicit `--cache` and say why.
 - `vault-engine hook install` no longer crashes when run from an installed
   package. `_vault_assets/` lived at the repo root, outside `src/`, so
   hatchling never shipped it in the wheel, and the CLI resolved it by walking

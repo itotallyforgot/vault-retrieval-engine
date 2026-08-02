@@ -6,9 +6,9 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-07-31 (v0.3.0). The retained-original and citation-chain
-entries were revised 2026-08-02 for the `vault-engine source` fix on
-`Unreleased`; the rest carry the v0.3.0 verification date.
+Last updated: 2026-08-02 (v0.3.1). The retained-original and citation-chain
+entries were re-verified for the `vault-engine source` fix in that release;
+the rest carry the v0.3.0 verification date.
 
 ## Capability gaps
 
