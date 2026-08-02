@@ -6,13 +6,13 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-07-31 (v0.2.0, plus the merged but unreleased PDF adapter)
+Last updated: 2026-07-31 (v0.3.0)
 
 ## Capability gaps
 
 ### PDF ingestion is local-file, text-layer only; no other non-markdown format
 
-Unreleased on `main`: `vault-engine add ./paper.pdf --vault <path>` extracts
+Shipped in v0.3.0: `vault-engine add ./paper.pdf --vault <path>` extracts
 a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
 `## p. N` section per text-bearing page, retaining the original at
 `raw/_originals/<slug>.pdf`. What that still does not give you:
@@ -70,13 +70,39 @@ size cap is a real gap, not just a documentation bug.
 
 ## Architecture
 
+### The citation chain reaches no user-facing surface
+
+`CitationAssembler` is imported by exactly one non-test module: `eval.py`. Not
+`service.py`, not `http_server.py`, not `mcp_server.py`, not `cli.py`. So
+`vault-engine search`, `POST /query`, and the MCP `query_graph` tool all return
+hits and no chain. The assembler works and the eval harness asserts on it
+(`min_citation_depth`, `expected_citations`); nothing a user touches calls it.
+
+Two things have to change together, because fixing one alone ships an empty
+chain:
+
+- No transport calls `assemble`. `Service.query` returns `Router.dispatch`
+  verbatim.
+- Nothing the engine ingests is chainable. `CitationAssembler._walk` follows a
+  `sources:` frontmatter list and resolves originals through `raw_path`, and
+  no adapter writes either field. `add_pdf` writes ADR 0006's
+  `source_artifact` / `source_sha256` / `source_media_type`, and nothing in
+  `src/` reads them. `retrieval.source` looks for `raw_path`, so
+  `vault-engine source <pdf-slug>` reports no raw source for a page the engine
+  itself created and whose original is sitting in `raw/_originals/`.
+
+The eval fixtures pass because `tests/fixtures/sample_vault` is hand-authored
+to the `raw_path` convention the adapters do not emit. On a vault built with
+`vault-engine add`, citation depth is zero for every hit.
+
+
 ### CLI bypasses Service
 
 `status`, `reindex`, `search`, `expand`, `source`, and `eval` construct an
-`Indexer` plus `Retrieval` directly. Only `serve` and `mcp` go through
-`Service`.
+`Indexer` directly, and `expand`, `source`, and `eval` construct a
+`Retrieval` on top of it. Only `serve` and `mcp` go through `Service`.
 
-The retrieval half of this is fixed, unreleased. `cli.search` builds a
+The retrieval half of this shipped in v0.3.0. `cli.search` builds a
 `Router` from the already-open `Indexer` and calls `dispatch`, the same
 three-channel RRF path `Service.query` uses, so `vault-engine search "..."`
 and `POST /query` now answer from the same evidence. `EvalRunner` already
@@ -84,9 +110,8 @@ built its Router the same way, which is why the eval rig was measuring the
 HTTP path rather than the CLI one.
 
 What remains is object-graph duplication rather than a behavior gap.
-`status`, `reindex`, `search`, `expand`, `source`, and `eval` still construct an
-`Indexer` (and, for `expand` / `source`, a `Retrieval`) directly instead of
-going through `Service`. Making `Service` the single assembler needs a
+All six commands still assemble their own `Indexer` instead of going
+through `Service`. Making `Service` the single assembler needs a
 lifecycle that skips the rebuild for commands that do not need one, and a
 naive `Service.start(rebuild=False)` will not do: nothing but
 `Indexer.rebuild()` populates the graph, so a no-rebuild start leaves it
@@ -111,7 +136,7 @@ facade, so a second transport would have to reimplement them.
 
 ### A cache built before the vault stamp is not audited, only adopted
 
-Unreleased on `main`: `VecStore.open()` records the vault a store was built
+Shipped in v0.3.0: `VecStore.open()` records the vault a store was built
 from and refuses to open it from another (`VaultPathMismatch`). A store built
 *before* that stamp existed carries no record of its origin, so it adopts
 whichever vault opens it first. That is deliberate — the alternative is
@@ -232,12 +257,13 @@ would unblock that. Out of scope unless usage demands it.
 
 ## Documentation state
 
-Seven ADRs exist. Five are on `main` and accepted: sqlite-vec (0001),
-NetworkX (0002), the 0.85 INFERRED threshold (0003), router tiers (0004),
-and the mxbai default model (0005). Two are in flight on branches and not
-yet merged: 0006 source-coordinate preservation (Proposed) and 0007 the
-lexical RRF channel (Accepted). `docs/adr/README.md` indexes the five on
-`main`.
+Seven ADRs exist and all seven are on `main`, indexed in
+`docs/adr/README.md`: sqlite-vec (0001), NetworkX (0002), the 0.85 INFERRED
+threshold (0003), router tiers (0004), the mxbai default model (0005),
+source-coordinate preservation (0006), and the lexical RRF channel (0007).
+Six are Accepted. 0006 is still Proposed: it decided artifact retention and
+deliberately stopped short of deciding how a coordinate is stored, which is
+the open half described under Roadmap below.
 
 ## Roadmap
 
@@ -248,40 +274,33 @@ performance fix, concurrency hygiene, and a security backlog instead. Those
 four remain open and are described above. No date is attached to anything
 below, because the last estimate was wrong by about three months.
 
+Two items this list carried are closed. **CLI uses the Router** and **chunk
+identity through the router** both shipped in v0.3.0; what each one left
+behind is folded into the items below rather than kept as a done entry.
+
 Ordering, and the constraint that forces it:
 
-1. **CLI uses the Router.** Landed on `main`, unreleased. The user-visible
-   half of what this item was for: `vault-engine search` now dispatches
-   through `Router` instead of `Retrieval`, so it answers from the same three
-   channels as `POST /query`. It does *not* route through `Service`, and
-   deliberately so. A `Service` lifecycle that skips the rebuild would leave
-   the graph empty and break the very topology channel it exists to add.
-   The remaining Service consolidation is object-graph cleanup with no
-   retrieval-quality payoff, and is described above.
-2. **`schema_version` on `embedding_meta`, alone.** One additive column plus
+1. **`schema_version` on `embedding_meta`, alone.** One additive column plus
    the migration ladder. Landing it by itself is what lets every later
    migration be a single-variable change, which is the opposite of the
    bundling an earlier draft of ADR 0006 proposed.
-3. **Kind-prefixed slugs.** Blocked on a design question that has no answer
+2. **Kind-prefixed slugs.** Blocked on a design question that has no answer
    yet: wikilinks in a vault are written `[[foo]]`, not `[[topic-foo]]`, so
    prefixed slugs need a bare-target resolution rule, and if both `topic-foo`
    and `raw-foo` exist the collision reappears at link-resolution time. A
    loud `SlugCollisionError` is a defensible state; a half-designed
    resolution rule is not.
-4. **Source coordinates.** ADR 0006 deliberately stopped at artifact
+3. **Source coordinates.** ADR 0006 deliberately stopped at artifact
    retention. The coordinates ADR should be written against what the PDF
    extractor actually emits, now that one exists. The first draft of 0006 was
    refuted precisely because it designed the storage before the producer.
-   Its prerequisite (chunk identity, item 5) is no longer in the way.
-5. **Chunk identity through the router.** Landed on `main`, unreleased.
-   `RankedHit` and `FusedHit` now carry `chunk_idx` / `content`, and
-   `FusedHit` carries `per_channel_chunks` for the case where channels
-   disagree about which chunk matched a page. Fusion still accumulates on the
-   page slug, so no ranking moved. What this does *not* yet do: the chunk
-   identity is an index and the chunk text, not a source coordinate — there
-   is still no page number, byte offset, or line range on a chunk, because
-   nothing stores one (see item 4). `mcp_server.py` also does not surface the
-   new fields yet; `POST /query` does.
+   Its prerequisite, chunk identity through the router, is no longer in the
+   way: `RankedHit` and `FusedHit` carry `chunk_idx` / `content` and
+   `per_channel_chunks` as of v0.3.0. What that gives is an index and the
+   chunk text, not a coordinate — there is still no page number, byte offset,
+   or line range on a chunk, because nothing stores one. `POST /query`
+   returns `chunk_idx` and `per_channel_chunks`; `mcp_server.py` does not
+   surface either field yet.
 
 Not scheduled, with reasons rather than vague deferral:
 

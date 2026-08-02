@@ -9,32 +9,64 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
-### Security
-- **One vault's pages could be retrieved from another vault's index.**
-  `EngineConfig.cache_dir` defaulted to `~/.cache/vault-retrieval` with no
-  vault keying, and `embeddings_db` was a fixed `cache_dir/embeddings.db`, so
-  every vault on a machine that did not pass `--cache` wrote into one store.
-  Reproduced end to end: index vault A (holding a confidential page), index
-  vault B, search B, and A's page comes back as a top hit with its full chunk
-  text. It survived repeated rebuilds of B and survived deleting vault A from
-  disk. `serve` and `mcp` share the default, so the same contamination reached
-  HTTP responses and MCP tool results. `CitationAssembler._walk` drops slugs it
-  cannot resolve in the current vault without erroring, so a leaked hit printed
-  content with an empty citation chain and no warning — in a tool whose pitch is
-  auditable citation.
-  - `VecStore.open()` now records the vault a store was built from in a new
-    `store_meta` table and raises `VaultPathMismatch` when a different vault
-    opens it, naming both paths and both escape hatches (`--cache <dir>` for a
-    genuine second vault, `reindex --force` for one that moved). The check sits
-    directly below the existing `EmbeddingModelMismatch` check and fails closed,
-    rather than silently partitioning the cache by a hash of the vault path: a
-    moved vault would then re-embed for an hour with no explanation, and a tool
-    that has already silently mixed two corpora should not answer that with a
-    second silent behavior.
-  - A store built before this change has no stamp, so it adopts its current
-    vault on first open. Nobody re-embeds on upgrade. If you have run more than
-    one vault through the default cache, run `vault-engine reindex --force` once
-    to rebuild from vault truth.
+## [0.3.0] - 2026-07-31
+
+Eight commits since `v0.2.0`. The headline is a cross-vault information
+disclosure closed at the store layer, local-file PDF ingestion, and
+`vault-engine search` finally answering from the same three channels the
+HTTP and MCP surfaces have always used. Cut promptly rather than batched:
+v0.2.0 existed because 100 commits including security fixes sat untagged
+for 87 days, and a fix for a leak is worth less the longer it waits.
+
+### Added
+- Chunk identity survives the router and RRF (roadmap item 5). `RankedHit`
+  and `FusedHit` gained `chunk_idx` / `content`, and `FusedHit` gained
+  `per_channel_chunks`. `Router._vector_search` was discarding the
+  `chunk_idx` and `content` that `VecHit` already carried, and
+  `_lexical_search` was collapsing its best-chunk-per-page dedupe to a bare
+  slug, so nothing downstream of the router could say which chunk matched.
+  only which page. This is the prerequisite the roadmap named for
+  chunk-level provenance (source coordinates) reaching a transport, and for
+  the CLI moving onto `Service` (`vault-engine search` prints a chunk index
+  and chunk text that `Service.query` could not supply).
+  - Fusion is unchanged: RRF still accumulates on the page slug. Chunk
+    identity is carried on the hit and never used as a fusion key, so the
+    ranking is byte-identical (verified by diffing the fused ranking for
+    every eval fixture query before and after; the eval rig stays 6/6).
+  - When channels disagree about which chunk matched a page, the fused hit
+    reports the chunk from the single best-ranked channel contribution, and
+    `per_channel_chunks` keeps every channel's pick so the disagreement is
+    inspectable rather than discarded. Rank ties break on channel order
+    (vector, lexical, topology), which makes the pick deterministic.
+  - Topology hits are page-level and report `chunk_idx = None` rather than a
+    fabricated 0.
+  - `POST /query` gained two additive keys per fused hit, `chunk_idx` and
+    `per_channel_chunks`. No existing key changed; `content` is deliberately
+    not returned over HTTP.
+- Local-file PDF ingestion. `vault-engine add ./paper.pdf --vault <path>`
+  extracts a PDF's text layer with `pypdf` and writes `raw/<slug>.md` with
+  one `## p. N` section per text-bearing page. Page markers are ordinary H2
+  headings, so `chunker.chunk_page` (which splits on H1/H2 and keeps the
+  heading line in the chunk text) carries them into the vector store and the
+  FTS index with no schema change. `add` routes an `http(s)` argument to the
+  existing URL adapter and anything else to the PDF adapter; there is no
+  remote PDF fetch, which keeps the SSRF surface `url_ingester` closes shut.
+- ADR 0006 artifact retention, implemented for PDFs. The source file is
+  copied to `raw/_originals/<slug>.pdf` and the generated page records
+  `source_artifact`, `source_sha256`, and `source_media_type` in
+  frontmatter, so a citation chain can name the original a claim descends
+  from and that claim is checkable. `url_ingester.write_raw_file` grew
+  `source_type` and `extra_frontmatter` parameters to render these; both
+  default to today's behaviour.
+- `pypdf` dependency (BSD-3-Clause, compatible with this repo's MIT
+  licence). PyMuPDF was rejected: it is AGPL-3.0.
+- CLI output characterization tests. `search`, `expand`, and `source` had
+  no stdout coverage at all. `tests/test_cli.py` only asserted that the
+  word `search` appears in `--help`, so a change behind any of them could
+  reshape what a user sees with nothing going red. The suite pins current
+  output against `tests/fixtures/sample_vault` with the mock embedder, and
+  pinned the wikilink-eating defect on purpose so the fix below landed as a
+  deliberate test diff rather than an accident.
 
 ### Changed
 - **`vault-engine search` now runs all three retrieval channels, and its
@@ -71,6 +103,13 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
   - No `Service` method was added, no lifecycle mode was added, and
     `Retrieval` is untouched. `status`, `reindex`, `expand`, and `source` are
     untouched.
+- Dependency floors moved by the grouped Dependabot update:
+  `sentence-transformers` 5.6.0 to 5.6.1 (runtime) and `ruff` 0.15.21 to
+  0.16.0 (dev). No source change was needed for either.
+- `KNOWN_ISSUES.md` records the roadmap ordering and the constraint that
+  forces each position, plus why an ANN vector index and a Zotero bridge
+  are not scheduled. The section previously said what had not landed but
+  not what comes next.
 
 ### Fixed
 - **`Indexer.rebuild()` never pruned.** A page renamed or deleted while the
@@ -124,50 +163,32 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
   original is still written first so its own guards run before anything
   lands, but it is removed if `write_raw_file` then fails.
 
-### Added
-- Chunk identity survives the router and RRF (roadmap item 5). `RankedHit`
-  and `FusedHit` gained `chunk_idx` / `content`, and `FusedHit` gained
-  `per_channel_chunks`. `Router._vector_search` was discarding the
-  `chunk_idx` and `content` that `VecHit` already carried, and
-  `_lexical_search` was collapsing its best-chunk-per-page dedupe to a bare
-  slug, so nothing downstream of the router could say which chunk matched —
-  only which page. This is the prerequisite the roadmap named for
-  chunk-level provenance (source coordinates) reaching a transport, and for
-  the CLI moving onto `Service` (`vault-engine search` prints a chunk index
-  and chunk text that `Service.query` could not supply).
-  - Fusion is unchanged: RRF still accumulates on the page slug. Chunk
-    identity is carried on the hit and never used as a fusion key, so the
-    ranking is byte-identical (verified by diffing the fused ranking for
-    every eval fixture query before and after; the eval rig stays 6/6).
-  - When channels disagree about which chunk matched a page, the fused hit
-    reports the chunk from the single best-ranked channel contribution, and
-    `per_channel_chunks` keeps every channel's pick so the disagreement is
-    inspectable rather than discarded. Rank ties break on channel order
-    (vector, lexical, topology), which makes the pick deterministic.
-  - Topology hits are page-level and report `chunk_idx = None` rather than a
-    fabricated 0.
-  - `POST /query` gained two additive keys per fused hit, `chunk_idx` and
-    `per_channel_chunks`. No existing key changed; `content` is deliberately
-    not returned over HTTP.
-- Local-file PDF ingestion. `vault-engine add ./paper.pdf --vault <path>`
-  extracts a PDF's text layer with `pypdf` and writes `raw/<slug>.md` with
-  one `## p. N` section per text-bearing page. Page markers are ordinary H2
-  headings, so `chunker.chunk_page` (which splits on H1/H2 and keeps the
-  heading line in the chunk text) carries them into the vector store and the
-  FTS index with no schema change. `add` routes an `http(s)` argument to the
-  existing URL adapter and anything else to the PDF adapter; there is no
-  remote PDF fetch, which keeps the SSRF surface `url_ingester` closes shut.
-- ADR 0006 artifact retention, implemented for PDFs. The source file is
-  copied to `raw/_originals/<slug>.pdf` and the generated page records
-  `source_artifact`, `source_sha256`, and `source_media_type` in
-  frontmatter, so a citation chain can name the original a claim descends
-  from and that claim is checkable. `url_ingester.write_raw_file` grew
-  `source_type` and `extra_frontmatter` parameters to render these; both
-  default to today's behaviour.
-- `pypdf` dependency (BSD-3-Clause, compatible with this repo's MIT
-  licence). PyMuPDF was rejected: it is AGPL-3.0.
-
 ### Security
+- **One vault's pages could be retrieved from another vault's index.**
+  `EngineConfig.cache_dir` defaulted to `~/.cache/vault-retrieval` with no
+  vault keying, and `embeddings_db` was a fixed `cache_dir/embeddings.db`, so
+  every vault on a machine that did not pass `--cache` wrote into one store.
+  Reproduced end to end: index vault A (holding a confidential page), index
+  vault B, search B, and A's page comes back as a top hit with its full chunk
+  text. It survived repeated rebuilds of B and survived deleting vault A from
+  disk. `serve` and `mcp` share the default, so the same contamination reached
+  HTTP responses and MCP tool results. `CitationAssembler._walk` drops slugs it
+  cannot resolve in the current vault without erroring, so a leaked hit printed
+  content with an empty citation chain and no warning, in a tool whose pitch is
+  auditable citation.
+  - `VecStore.open()` now records the vault a store was built from in a new
+    `store_meta` table and raises `VaultPathMismatch` when a different vault
+    opens it, naming both paths and both escape hatches (`--cache <dir>` for a
+    genuine second vault, `reindex --force` for one that moved). The check sits
+    directly below the existing `EmbeddingModelMismatch` check and fails closed,
+    rather than silently partitioning the cache by a hash of the vault path: a
+    moved vault would then re-embed for an hour with no explanation, and a tool
+    that has already silently mixed two corpora should not answer that with a
+    second silent behavior.
+  - A store built before this change has no stamp, so it adopts its current
+    vault on first open. Nobody re-embeds on upgrade. If you have run more than
+    one vault through the default cache, run `vault-engine reindex --force` once
+    to rebuild from vault truth.
 - A PDF with no extractable text layer is refused with an error naming the
   file, rather than ingested as an empty page. There is no OCR.
 - **Extracted text can no longer forge a page marker.** `chunker.chunk_page`
@@ -448,6 +469,7 @@ land slug-schema migration, the Service-CLI refactor, full GraphQuery
 facade, and observability polish. See the v0.2.0 hardening epic
 (tracked in an internal issue tracker) for the full scope.
 
-[Unreleased]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/itotallyforgot/vault-retrieval-engine/releases/tag/v0.1.0
