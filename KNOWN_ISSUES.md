@@ -6,7 +6,9 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-07-31 (v0.3.0)
+Last updated: 2026-07-31 (v0.3.0). The retained-original and citation-chain
+entries were revised 2026-08-02 for the `vault-engine source` fix on
+`Unreleased`; the rest carry the v0.3.0 verification date.
 
 ## Capability gaps
 
@@ -28,10 +30,15 @@ a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
   `url_ingester` closes, and `curl` first costs nothing.
 - **No docx, epub, html-on-disk, or plain `.txt`.** There is no extraction
   path for any of them and none is planned in the repo.
-- **The retained original stays invisible to the engine.**
-  `vault_reader.iter_pages` still globs `vault_path.rglob("*.md")`, so
-  nothing indexes `raw/_originals/` and nothing re-verifies the recorded
-  `source_sha256`. ADR 0006 records that as a known negative.
+- **The retained original stays unindexed, and nothing re-verifies it in the
+  background.** `vault_reader.iter_pages` still globs
+  `vault_path.rglob("*.md")`, so nothing indexes `raw/_originals/`. Since
+  Unreleased, `vault-engine source <slug>` re-hashes the retained original
+  and reports `integrity: ok` / `MISMATCH` / `MISSING` against the recorded
+  `source_sha256` — but only when you ask for that one page. Nothing sweeps
+  the vault, and neither `status` nor `reindex` notices a deleted or altered
+  original. ADR 0006 records the absence of verification as a known negative;
+  this narrows it to on-demand rather than closing it.
 - **The page coordinate is carried in band.** `## p. N` is an ordinary H2 in
   the same markdown body the document contributes text to. Extracted lines
   that open with `#` are escaped, so a document cannot author its own
@@ -86,10 +93,11 @@ chain:
 - Nothing the engine ingests is chainable. `CitationAssembler._walk` follows a
   `sources:` frontmatter list and resolves originals through `raw_path`, and
   no adapter writes either field. `add_pdf` writes ADR 0006's
-  `source_artifact` / `source_sha256` / `source_media_type`, and nothing in
-  `src/` reads them. `retrieval.source` looks for `raw_path`, so
-  `vault-engine source <pdf-slug>` reports no raw source for a page the engine
-  itself created and whose original is sitting in `raw/_originals/`.
+  `source_artifact` / `source_sha256` / `source_media_type`, which as of
+  Unreleased only `retrieval.source` reads — `vault-engine source <pdf-slug>`
+  now reports the retained original and its integrity, but the assembler still
+  knows nothing about `source_artifact`, so citation depth on a PDF-ingested
+  page is still zero.
 
 The eval fixtures pass because `tests/fixtures/sample_vault` is hand-authored
 to the `raw_path` convention the adapters do not emit. On a vault built with

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import networkx as nx
 
 from vault_engine.config import EngineConfig
-from vault_engine.retrieval import Retrieval, SearchHit
+from vault_engine.retrieval import Retrieval, SearchHit, resolve_in_vault
 from vault_engine.vault_reader import iter_pages, read_page
 
 if TYPE_CHECKING:
@@ -79,8 +79,14 @@ class CitationAssembler:
             return
         seen.add(slug)
         page = read_page(path)
+        # raw_path is attacker-influenced frontmatter (pages scraped from URLs
+        # land in raw/ carrying whatever the page authored), and a Citation is
+        # a serializable record. Confine it to the vault the same way
+        # Retrieval.source does, so a crafted `raw_path: ../../../etc/passwd`
+        # yields None instead of an absolute path a transport would disclose.
         raw_rel = page.frontmatter.get("raw_path")
-        raw_abs = str((self.cfg.vault_path / Path(str(raw_rel))).resolve()) if raw_rel else None
+        raw_target = resolve_in_vault(self.cfg.vault_path, raw_rel) if raw_rel else None
+        raw_abs = str(raw_target) if raw_target and raw_target.exists() else None
         out.append(
             Citation(
                 page_slug=slug,
