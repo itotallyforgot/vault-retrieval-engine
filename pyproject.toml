@@ -1,5 +1,5 @@
 [project]
-name = "vault-engine"
+name = "vault-retrieval-engine"
 version = "0.3.0"
 description = "Local semantic retrieval engine over a markdown vault."
 requires-python = ">=3.12"
@@ -51,6 +51,11 @@ torch = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Distribution name (vault-retrieval-engine) differs from the import package
+# (vault_engine), so hatchling's name heuristic can't find the sources.
+[tool.hatch.build.targets.wheel]
+packages = ["src/vault_engine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
