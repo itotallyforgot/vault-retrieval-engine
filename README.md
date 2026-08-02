@@ -30,7 +30,7 @@ If you've decided cloud RAG is fine for your use case, this isn't the right tool
 - **Lexical search:** BM25 over an FTS5 index of the same chunks. Always runs. This is the keyword and word-order leg, and it's what disambiguates the negation and word-swap cases the embedder can't (see [Known issues](./KNOWN_ISSUES.md)).
 - **Multi-hop graph walks** over wikilink edges plus inferred similarity edges (cosine threshold calibrated for vault topology).
 - **Rank fusion:** vector, lexical, and topology results are fused with reciprocal rank fusion, so a page that only one channel liked can still surface. Every hit reports which channels found it.
-- **Citation chains:** each retrieved chunk traces back to its page and onward to source pages, producing a verifiable evidence trail.
+- **Citation chains (not yet on a transport):** `CitationAssembler` walks a retrieved chunk back to its page and onward through `sources:` frontmatter to the raw file. It is built and tested, and the eval harness asserts on it, but `search`, `POST /query`, and the MCP tools do not return it. The one chain that does ship is the MCP `shortest_path` tool, which is a graph walk between two pages rather than a per-hit evidence trail.
 - **PDF ingestion:** `vault-engine add ./paper.pdf` extracts a local PDF's text layer into `raw/`, one `## p. N` section per page, so page markers ride into the index as ordinary headings. The original is retained under `raw/_originals/` and identified in frontmatter by its sha256 (see [ADR 0006](./docs/adr/0006-source-coordinate-preservation.md)). A PDF with no text layer is refused rather than ingested empty. There is no OCR.
 - **Watcher:** auto-reindex on filesystem changes, so newly-edited pages are queryable within seconds.
 - **Eval harness:** JSONL fixture runner with latency SLOs and page-coverage assertions. CI runs the eval against a mock embedder + sample vault.
@@ -59,8 +59,10 @@ If you've decided cloud RAG is fine for your use case, this isn't the right tool
                          |          Retrieval               |
                          |  router  -> LOOKUP / SEMANTIC /  |
                          |              MULTI_HOP / HYBRID  |
-                         |  CitationAssembler.assemble()    |
+                         |  vector + BM25 + topology, RRF   |
                          +-----------------+----------------+
+             (CitationAssembler.assemble() sits beside this, reached
+              only by the eval harness -- no transport calls it yet)
                                            |
                           +----------------+----------------+
                           |                |                |
@@ -82,16 +84,24 @@ uv sync
 
 # Index a vault. tests/fixtures/sample_vault is a small synthetic vault
 # you can use to try the engine without pointing at your own.
-uv run vault-engine --vault tests/fixtures/sample_vault reindex
+#
+# --cache /tmp/ve-demo keeps this throwaway index out of the default cache
+# directory. A cache directory belongs to one vault: the first vault to use
+# one claims it, and the engine refuses to open it for a different vault
+# afterwards. Without --cache, trying the demo would claim your default
+# cache for the fixture vault, and your own vault would then be refused.
+uv run vault-engine --vault tests/fixtures/sample_vault --cache /tmp/ve-demo reindex
 
 # Search.
-uv run vault-engine --vault tests/fixtures/sample_vault search "alpha protocol"
+uv run vault-engine --vault tests/fixtures/sample_vault --cache /tmp/ve-demo search "alpha protocol"
 
 # Run the eval harness against the same fixture vault.
-uv run vault-engine --vault tests/fixtures/sample_vault eval \
+uv run vault-engine --vault tests/fixtures/sample_vault --cache /tmp/ve-demo eval \
     --fixtures tests/fixtures/eval_fixtures.jsonl \
     --embedder mock
 ```
+
+Once you point it at your own vault, drop `--cache` and the default applies. If you ever need to move a vault or hand its cache to a different one, `vault-engine reindex --force` wipes the store and re-claims it.
 
 The `mock` embedder is fast and deterministic for iteration. Switch to `sentence-transformer` once you've decided on a model.
 
@@ -329,8 +339,9 @@ uv run pytest -q
 uv run ruff check .
 uv run ruff format .
 
-# Run the eval rig against the sample vault.
-uv run vault-engine --vault tests/fixtures/sample_vault eval \
+# Run the eval rig against the sample vault. --cache keeps the fixture
+# vault from claiming your default cache directory.
+uv run vault-engine --vault tests/fixtures/sample_vault --cache /tmp/ve-demo eval \
     --fixtures tests/fixtures/eval_fixtures.jsonl \
     --embedder mock
 ```

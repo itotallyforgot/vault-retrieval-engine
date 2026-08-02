@@ -83,7 +83,7 @@ jobs:
         run: uv sync --locked --group dev
       - name: Run eval against mock embedder + sample vault
         run: |
-          uv run vault-engine --vault tests/fixtures/sample_vault eval \
+          uv run vault-engine --vault tests/fixtures/sample_vault --cache "$RUNNER_TEMP/ve-eval" eval \
             --fixtures tests/fixtures/eval_fixtures.jsonl \
             --embedder mock \
             --threshold 0.85
