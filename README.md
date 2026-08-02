@@ -1,10 +1,12 @@
 # vault-engine
 
-A bolt-on turbocharger for a markdown vault. Local-only retrieval, no external API, citation chains you can audit.
+A bolt-on turbocharger for a markdown vault. Local-only retrieval, no external API, and an evidence trail built to be audited.
 
 Your vault already works without this. Wikilinks, folders, maybe a hand-maintained `KNOWLEDGE_ROUTER.md` pointing at the good stuff. The trouble with an index like that is it only knows what you remembered to put in it.
 
-vault-engine bolts three retrieval channels onto the same files and fuses the results: semantic vector search, BM25 lexical search, and graph topology walked over both your explicit wikilinks and similarity edges the engine infers on its own. Every hit comes back with a citation chain from chunk to page to source, so grounding is auditable instead of assumed. Nothing leaves the machine.
+vault-engine bolts three retrieval channels onto the same files and fuses the results: semantic vector search, BM25 lexical search, and graph topology walked over both your explicit wikilinks and similarity edges the engine infers on its own. Every hit names the chunk it came from and the channels that found it, so you can see what the answer rests on rather than taking it on trust. Nothing leaves the machine.
+
+Read this part before you rely on it. The citation-chain assembler exists and the eval harness exercises it, but no transport surfaces it yet, so `search`, `POST /query`, and the MCP tools return hits rather than chains. See [Known issues](./KNOWN_ISSUES.md).
 
 It pays off most in a dense, cross-domain vault, where the page you needed sits three hops away in a discipline you weren't searching. It isn't a large-corpus system. Personal-vault scale is the target, roughly 10k pages, and sqlite-vec's brute-force scan turns into the bottleneck somewhere past 50k chunks. Semantic ranking on its own also can't reliably separate a claim from its negation, which is the whole reason the lexical channel exists. See [Known issues](./KNOWN_ISSUES.md) for the measured numbers.
 
@@ -18,7 +20,7 @@ Cloud-hosted RAG creates three exposures that are unacceptable for personal know
 - **Query log retention.** Most providers log queries. A query reveals what you're researching, who you're investigating, what you're worried about. Query metadata is its own intelligence stream.
 - **Provider-side retention with unclear controls.** Even with deletion APIs, you're trusting the provider's word. There's no audit trail.
 
-vault-engine takes the constraint seriously: **local-only, no external API, citation chains for auditable retrieval.** The architecture follows from the threat model. Embedding model loads from local cache. Vector store is sqlite-vec on local disk. Graph store is in-process NetworkX. Query results carry citation chains so you can verify what fed each answer.
+vault-engine takes the constraint seriously: **local-only, no external API, and an evidence trail you can check.** The architecture follows from the threat model. Embedding model loads from local cache. Vector store is sqlite-vec on local disk. Graph store is in-process NetworkX. Results name the chunk and channels behind each hit; the citation chain that walks chunk to page to source is built and tested, but is not yet returned by any transport.
 
 If you've decided cloud RAG is fine for your use case, this isn't the right tool. If you've decided it isn't, the engine is shaped around that decision.
 
@@ -57,7 +59,7 @@ If you've decided cloud RAG is fine for your use case, this isn't the right tool
                          |          Retrieval               |
                          |  router  -> LOOKUP / SEMANTIC /  |
                          |              MULTI_HOP / HYBRID  |
-                         |  citations.assemble_chain()      |
+                         |  CitationAssembler.assemble()    |
                          +-----------------+----------------+
                                            |
                           +----------------+----------------+
@@ -99,7 +101,7 @@ The `mock` embedder is fast and deterministic for iteration. Switch to `sentence
 |---|---|
 | `vault-engine status` | Show vault path, vec store stats, graph stats, last reindex |
 | `vault-engine reindex [--force]` | Rebuild the index from the vault. Encode-skip on unchanged chunks. |
-| `vault-engine search <query> [--k N]` | Top-k fused results (vector + lexical BM25 + topology, merged by RRF). Prints each hit's chunk index, RRF score, contributing channels, and a chunk excerpt. No citation chains; use `POST /query` for those. |
+| `vault-engine search <query> [--k N]` | Top-k fused results (vector + lexical BM25 + topology, merged by RRF). Prints each hit's chunk index, RRF score, contributing channels, and a chunk excerpt. No citation chains: no transport emits them yet. |
 | `vault-engine expand <page>` | Print one page's body, frontmatter stripped. No graph walk. |
 | `vault-engine source <source-page>` | Print the raw file named by that source page's `raw_path`, verbatim. Takes a `wiki/sources/` slug; a `wiki/topics/` page has no `raw_path` and exits 1. |
 | `vault-engine eval --fixtures <path> [--embedder mock\|default]` | Run the JSONL fixture eval; assert latency + page-coverage |
@@ -337,7 +339,7 @@ Conventional Commits format. On pull requests and configured push branches, CI r
 
 ## Architecture decisions
 
-See [`docs/adr/`](docs/adr/README.md). Five ADRs are on `main`, covering sqlite-vec, NetworkX, the 0.85 INFERRED edge threshold, the router's mode boundaries, and the default embedding model. Two more are in flight and not yet merged: source-coordinate preservation (Proposed) and the lexical RRF channel (Accepted).
+See [`docs/adr/`](docs/adr/README.md). Seven ADRs are on `main`: sqlite-vec (0001), NetworkX (0002), the 0.85 INFERRED edge threshold (0003), the router's mode boundaries (0004), the default embedding model (0005), source-coordinate preservation (0006), and the lexical RRF channel (0007). All are Accepted except 0006, which is Proposed. That one stopped at artifact retention, and the coordinate storage itself is still unwritten.
 
 ## License
 
@@ -345,8 +347,10 @@ MIT. See [LICENSE](LICENSE).
 
 ## Status
 
-**v0.2.0** adds the BM25 lexical channel and RRF fusion, the `AMBIGUOUS` similarity-edge band, the bag-of-words adversarial regression gate, a page-vector cache that removes the per-save reindex stall, trailing-edge watcher debounce, a macOS launchd service path, and a backlog of security fixes (DNS-rebinding pin, two CodeQL `py/bad-tag-filter` fixes, dependency advisory bumps, CI supply-chain hardening). Current local collection: 217 tests (215 passing, 2 xfail by design on the adversarial word-swap and shuffle classes). Five ADRs on `main`, two more in flight.
+**v0.3.0** closes a cross-vault information disclosure: every vault that did not pass `--cache` shared one embeddings store, so one vault's pages and their full chunk text were returned by searches against another. The store now records the vault it was built from and fails closed. It also adds local-file PDF ingestion with ADR 0006 artifact retention, chunk identity through the router and RRF, a prune pass so pages deleted while the engine was down leave the index, and `vault-engine search` dispatching through the Router so the CLI answers from the same three channels as `POST /query`. Current local collection: 274 tests (272 passing, 2 xfail by design on the adversarial word-swap and shuffle classes). Coverage is 89% over `src/vault_engine`, 95% including the test modules; CI gates at 91% on the latter. Seven ADRs on `main`.
+
+**v0.2.0** (2026-07-30, tag `v0.2.0`) added the BM25 lexical channel and RRF fusion, the `AMBIGUOUS` similarity-edge band, the bag-of-words adversarial regression gate, a page-vector cache that removes the per-save reindex stall, trailing-edge watcher debounce, a macOS launchd service path, and a backlog of security fixes (DNS-rebinding pin, two CodeQL `py/bad-tag-filter` fixes, dependency advisory bumps, CI supply-chain hardening).
 
 **v0.1.0** (2026-05-04, tag `v0.1.0`) shipped encode-skip, INFERRED edges, the NSSM Windows service, the post-commit auto-reindex hook, the URL to `raw/` adapter, and ripgrep fallback.
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: no PDF or non-markdown ingestion, and no chunk size cap. The third one named here, the CLI running vector-only search while the HTTP and MCP surfaces ran all three channels, is closed on `main` and not yet in a tagged release.
+See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: the chunker has no size cap, ingestion stops at markdown and text-layer PDFs (no OCR, no docx or epub, no remote PDF fetch), and the CLI still assembles its own `Indexer` instead of going through `Service`, which is object-graph duplication now that the retrieval half is closed.
