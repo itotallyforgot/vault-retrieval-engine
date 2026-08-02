@@ -1,7 +1,8 @@
 # ADR 0006 — Retain original artifacts and record their identity
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-07-30
+**Accepted:** 2026-08-02
 **Decision-maker:** project owner
 
 ## Context
@@ -39,6 +40,17 @@ Page numbers, character spans, and a fidelity enum are deliberately **not** in t
 
 Frontmatter rather than the vector store, because the vault is the source of truth and this is provenance about a page, not about a chunk. It needs no migration, no `schema_version` column, and no re-embed. `citations.py` already reads frontmatter for `raw_path`, so surfacing these is an additive change to `Citation`.
 
+### `source_artifact` is not a second name for `raw_path`
+
+Recorded because a reviewer read the two keys as the same field under different names and proposed unifying them. They are different hops in the same chain, on opposite sides of the `raw/` page:
+
+- **`raw_path`** points from a *derived wiki page* to the *raw markdown* it was made from. `Retrieval.source` resolves it and prints the file's text.
+- **`source_artifact`** points from a *raw markdown page* to the *binary original* under `raw/_originals/`.
+
+Unifying them breaks in a specific way worth naming so nobody tries it twice. Teaching `Retrieval.source` to fall through to `source_artifact` and read it as text raises `UnicodeDecodeError` on a PDF. Making the PDF adapter write `raw_path` instead does the same thing, and collapses two meanings into one key so every future reader inherits the ambiguity.
+
+What shipped instead reports a page carrying `source_artifact` rather than dumping it, giving the path, the recorded hash, the media type, and an on-demand integrity check against the bytes on disk.
+
 ## Alternatives considered
 
 | Option | Why rejected |
@@ -60,17 +72,19 @@ Frontmatter rather than the vector store, because the vault is the source of tru
 ### Negative
 
 - Vault size grows by the size of retained originals, and `raw/_originals/` will be the largest thing in a PDF-heavy vault. This lands in Obsidian Sync and in any git remote the vault has.
-- `vault_reader.iter_pages` and the watcher are both markdown-only, so a retained original is invisible to the engine. Nothing notices if one is deleted or moved, and `source_sha256` only means something if something re-verifies it. This decision does not add that verification, so a chain can point at a missing file without saying so.
-- It delivers nothing until an adapter retains an original. Today `add <url>` is the only ingestion path and it handles HTML, where the value is real but modest.
+- `vault_reader.iter_pages` and the watcher are both markdown-only, so a retained original is invisible to the engine. Nothing notices if one is deleted or moved. **Partly closed since acceptance:** `vault-engine source <slug>` now re-hashes the retained bytes and reports `ok`, `MISMATCH`, or `MISSING`. That is on demand and per page. Nothing sweeps the vault, so a stale artifact still goes unnoticed until someone asks about that page.
+- It delivers nothing until an adapter retains an original. **Resolved since acceptance:** the local-file PDF adapter retains originals and writes all three fields. `add <url>` still handles HTML only and writes none of them, so a URL-ingested page carries no artifact.
 
 ## Status flags
 
-Blocked on, and should land with or after:
+Both preconditions this ADR was blocked on have since cleared, which is why it moved from Proposed to Accepted:
 
-- A paged-format ingestion adapter. Without one this decision only applies to HTML.
+- A paged-format ingestion adapter exists. The local-file PDF adapter retains originals and writes the three fields.
+- `Router._vector_search` preserves `chunk_idx`, so chunk-level provenance can now reach a transport.
 
 Revisit if:
 
-- A paged extractor ships, at which point the deferred coordinates ADR should be written against what it actually emits.
-- `Router._vector_search` starts preserving `chunk_idx`, which is the precondition for any chunk-level provenance reaching a transport.
+- The deferred coordinates ADR gets written. It should be written against what the PDF extractor actually emits, which is a `## p. N` heading per text-bearing page, in band with the content. Note the chunk-to-page mapping that falls out of this is accidental rather than enforced: a `raw/` page is an ordinary vault file, and a hand-added heading breaks the mapping with no error.
+- `add <url>` starts retaining originals. Today it writes none of these fields, so half the ingestion surface is outside this decision.
 - Retained originals prove too large for vault sync, which would force the machine-local option this ADR rejects, and with it a portability tradeoff worth its own decision.
+- Anything starts reading these fields from a transport. They are written and read by `source` today; no HTTP or MCP surface returns them.
