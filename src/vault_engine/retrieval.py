@@ -4,6 +4,7 @@ Composes vec store + graph store + vault filesystem. Stateless aside from
 references to indexer.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +16,25 @@ from vault_engine.reranker import RankedHit
 from vault_engine.stores.graph_store import GraphStore
 from vault_engine.stores.vec_store import VecHit
 from vault_engine.vault_reader import iter_pages, read_page
+
+
+def resolve_in_vault(vault_path: Path, rel: object) -> Path | None:
+    """Resolve a vault-relative frontmatter path, refusing escapes.
+
+    Frontmatter path fields (``raw_path``, ``source_artifact``) are
+    attacker-influenced — they come from page content, which may be scraped or
+    otherwise untrusted — so a crafted ``../../etc/passwd`` must not escape the
+    vault root. Returns ``None`` on escape. Existence is the caller's business:
+    a missing target is a different fact from an out-of-vault one.
+    """
+    vault_root = vault_path.resolve()
+    target = (vault_root / Path(str(rel))).resolve()
+    try:
+        target.relative_to(vault_root)
+    except ValueError:
+        return None
+    return target
+
 
 # Aliases shorter than this are skipped from unlinked-mention detection
 # (would otherwise produce a flood of false positives on common words).
@@ -73,13 +93,21 @@ class Retrieval:
 
     # ---- source ----
     def source(self, page_slug: str) -> str | None:
-        """For a wiki/source page, return contents of its `raw_path` if set.
+        """Return a page's raw source: its `raw_path` text, or a report on its
+        retained original.
 
-        ``raw_path`` is attacker-influenced frontmatter (it comes from page
-        content, which may be scraped or otherwise untrusted), so the resolved
-        target is confined to the vault root before reading — a crafted
-        ``raw_path: ../../etc/passwd`` must not escape. This mirrors the
-        containment guard on the write path in ``url_ingester.write_raw_file``.
+        Two different hops, so two different answers:
+
+        - ``raw_path`` points from a derived wiki page at the raw *markdown* it
+          was made from, and its text is returned verbatim.
+        - ``source_artifact`` (ADR 0006) points from a raw markdown page at a
+          *binary* original under ``raw/_originals/``. Those bytes are not text
+          and are not dumped; what comes back is where the original is, what it
+          is, and whether it still hashes to the ``source_sha256`` recorded at
+          ingestion.
+
+        Both keys are attacker-influenced frontmatter, so both are confined to
+        the vault root by ``resolve_in_vault`` before anything is touched.
         """
         path = self._path_for_slug(page_slug)
         if path is None:
@@ -87,17 +115,42 @@ class Retrieval:
         page = read_page(path)
         raw_rel = page.frontmatter.get("raw_path")
         if not raw_rel:
-            return None
-        vault_root = self.cfg.vault_path.resolve()
-        raw_abs = (vault_root / Path(str(raw_rel))).resolve()
-        try:
-            raw_abs.relative_to(vault_root)
-        except ValueError:
-            # raw_path escapes the vault root (path traversal); refuse.
-            return None
-        if not raw_abs.exists():
+            return self._retained_original_report(page.frontmatter)
+        raw_abs = resolve_in_vault(self.cfg.vault_path, raw_rel)
+        if raw_abs is None or not raw_abs.exists():
             return None
         return raw_abs.read_text(encoding="utf-8")
+
+    def _retained_original_report(self, fm: dict) -> str | None:
+        """Describe the binary original a raw page was extracted from.
+
+        The recorded ``source_sha256`` only means something if something
+        re-verifies it (ADR 0006 lists that as a known negative), so this
+        re-hashes the retained bytes and reports the verdict rather than
+        echoing the frontmatter back.
+        """
+        artifact_rel = fm.get("source_artifact")
+        if not artifact_rel:
+            return None
+        target = resolve_in_vault(self.cfg.vault_path, artifact_rel)
+        if target is None:
+            # source_artifact escapes the vault root (path traversal); refuse.
+            return None
+        recorded = str(fm.get("source_sha256") or "")
+        if not target.exists():
+            integrity = "MISSING (nothing at that path)"
+        elif not recorded:
+            integrity = "unverifiable (no source_sha256 recorded)"
+        else:
+            actual = hashlib.sha256(target.read_bytes()).hexdigest()
+            integrity = "ok" if actual == recorded else f"MISMATCH (on disk: {actual})"
+        rel = target.relative_to(self.cfg.vault_path.resolve()).as_posix()
+        return (
+            f"retained original: {rel}\n"
+            f"media type: {fm.get('source_media_type') or 'unknown'}\n"
+            f"source_sha256: {recorded or 'unrecorded'}\n"
+            f"integrity: {integrity}\n"
+        )
 
     # ---- consolidation ----
     def consolidation_candidates(self) -> ConsolidationReport:

@@ -103,7 +103,7 @@ The `mock` embedder is fast and deterministic for iteration. Switch to `sentence
 | `vault-engine reindex [--force]` | Rebuild the index from the vault. Encode-skip on unchanged chunks. |
 | `vault-engine search <query> [--k N]` | Top-k fused results (vector + lexical BM25 + topology, merged by RRF). Prints each hit's chunk index, RRF score, contributing channels, and a chunk excerpt. No citation chains: no transport emits them yet. |
 | `vault-engine expand <page>` | Print one page's body, frontmatter stripped. No graph walk. |
-| `vault-engine source <source-page>` | Print the raw file named by that source page's `raw_path`, verbatim. Takes a `wiki/sources/` slug; a `wiki/topics/` page has no `raw_path` and exits 1. |
+| `vault-engine source <page>` | For a page with `raw_path`, print that raw file verbatim. For a raw page with a retained original (`source_artifact`, written by `add <file.pdf>`), print where the original is, its media type, and whether it still matches the recorded `source_sha256`; the binary itself is not dumped. A `wiki/topics/` page has neither and exits 1. |
 | `vault-engine eval --fixtures <path> [--embedder mock\|default]` | Run the JSONL fixture eval; assert latency + page-coverage |
 | `vault-engine add <url> --vault <path>` | One-shot scrape a URL into `raw/` (trafilatura extraction). Note: `add`, `serve`, `mcp`, and `hook` define their own `--vault` flag; placement matters. |
 | `vault-engine add <file.pdf> --vault <path>` | One-shot ingest a local PDF into `raw/`, one `## p. N` section per page (pypdf text layer). Retains the original at `raw/_originals/<slug>.pdf`. Local files only; no remote PDF fetch. |

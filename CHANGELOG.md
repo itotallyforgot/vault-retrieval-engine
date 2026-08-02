@@ -9,6 +9,42 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
+### Fixed
+- `vault-engine source <slug>` no longer reports `no raw source` for a page
+  the engine itself created. `add_pdf` writes ADR 0006's `source_artifact` /
+  `source_sha256` / `source_media_type`; `Retrieval.source` read only
+  `raw_path`, so v0.3.0's headline feature produced pages whose own
+  provenance command denied they had a source. The two keys stay distinct
+  because they are different hops — `raw_path` points a derived wiki page at
+  the raw *markdown* it came from, `source_artifact` points a raw page at a
+  *binary* original under `raw/_originals/` — so `source` now reports the
+  retained original (vault-relative path, media type, recorded hash) instead
+  of dumping bytes that would not decode as UTF-8. `raw_path` pages behave
+  exactly as before.
+  - The report re-hashes the retained bytes and states the verdict:
+    `integrity: ok`, `MISMATCH (on disk: <sha256>)` if the original was
+    modified after ingestion, or `MISSING` if it was deleted. ADR 0006 lists
+    "nothing re-verifies the recorded `source_sha256`" as a known negative;
+    for this one command, something now does.
+  - `source_artifact` gets the same vault-containment guard `raw_path`
+    already had. Both are attacker-influenced frontmatter, so the guard moved
+    into a shared `retrieval.resolve_in_vault` rather than being written
+    twice.
+
+### Security
+- `CitationAssembler._walk` confines `raw_path` to the vault root before
+  putting it on a `Citation`. It previously resolved the frontmatter value
+  with no containment and no existence check, so a page carrying
+  `raw_path: ../../../../etc/passwd` produced `Citation.raw_path ==
+  "/etc/passwd"`. Nothing reads that file and no transport serializes a
+  citation today (`CitationAssembler` is still reachable only from
+  `eval.py`), so this was a latent path-disclosure primitive rather than a
+  live one — but pages scraped from URLs land in `raw/` with attacker-authored
+  frontmatter, and the guard belongs there before a transport arrives, not
+  after. An out-of-vault or non-existent target now yields `None`. The eval
+  rig stays 6/6, including the `min_citation_depth: 1` fixture that asserts
+  through this path.
+
 ## [0.3.0] - 2026-07-31
 
 Eight commits since `v0.2.0`. The headline is a cross-vault information

@@ -1,9 +1,14 @@
 from pathlib import Path
 
+import frontmatter
+
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer
+from vault_engine.pdf_ingester import add_pdf
 from vault_engine.retrieval import Retrieval
+
+PDF_FIXTURE = Path(__file__).parent / "fixtures" / "two_page.pdf"
 
 
 def _open_indexed(sample_vault: Path, tmp_path: Path) -> tuple[Indexer, Retrieval, EngineConfig]:
@@ -111,5 +116,98 @@ def test_multi_hop_returns_paths_touching_multiple_seeds(sample_vault: Path, tmp
         result = r.multi_hop(seed_query="alpha and beta", min_seeds_touched=2)
         # Should find at least one path through alpha->beta region.
         assert any("alpha" in p and "beta" in p for p in result.paths)
+    finally:
+        idx.close()
+
+
+def test_source_reports_retained_original_for_pdf_page(sample_vault: Path, tmp_path: Path):
+    """A page written by `add_pdf` carries `source_artifact`, not `raw_path`.
+
+    `source` must report the retained original (path, media type, recorded
+    hash, integrity) instead of claiming there is no raw source. The bytes are
+    NOT dumped: the artifact is a PDF and would not decode as UTF-8.
+    """
+    page = add_pdf(sample_vault, PDF_FIXTURE, title_override="Two Page Paper")
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        out = r.source(page.stem)
+        assert out is not None, "source() must not report 'no raw source'"
+        assert str(post["source_artifact"]) in out
+        assert str(post["source_sha256"]) in out
+        assert str(post["source_media_type"]) in out
+        assert "integrity: ok" in out
+    finally:
+        idx.close()
+
+
+def test_source_reports_tampered_retained_original(sample_vault: Path, tmp_path: Path):
+    """The recorded `source_sha256` is only worth something if it is checked."""
+    page = add_pdf(sample_vault, PDF_FIXTURE, title_override="Two Page Paper")
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+    original = sample_vault / str(post["source_artifact"])
+    original.write_bytes(original.read_bytes() + b"tampered")
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        out = r.source(page.stem)
+        assert out is not None
+        assert "MISMATCH" in out
+    finally:
+        idx.close()
+
+
+def test_source_refuses_source_artifact_escaping_vault(sample_vault: Path, tmp_path: Path):
+    """`source_artifact` is the same attacker-influenced frontmatter as
+    `raw_path` and gets the same containment guard.
+    """
+    secret = tmp_path / "secret.pdf"
+    secret.write_bytes(b"TOP SECRET")
+    (sample_vault / "raw" / "evil-artifact.md").write_text(
+        "---\n"
+        "title: Evil Artifact\n"
+        "tags: [source]\n"
+        "source_artifact: ../secret.pdf\n"
+        "source_sha256: deadbeef\n"
+        "source_media_type: application/pdf\n"
+        "---\n\n# Evil Artifact\n\nTries to escape the vault.\n",
+        encoding="utf-8",
+    )
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        assert (sample_vault / ".." / "secret.pdf").resolve() == secret.resolve()
+        assert r.source("evil-artifact") is None
+    finally:
+        idx.close()
+
+
+def test_source_reports_missing_and_unrecorded_originals(sample_vault: Path, tmp_path: Path):
+    """The other two integrity verdicts: the retained original was deleted, and
+    the page never recorded a hash to check it against.
+    """
+    (sample_vault / "raw" / "gone-artifact.md").write_text(
+        "---\n"
+        "title: Gone\n"
+        "source_artifact: raw/_originals/gone.pdf\n"
+        "source_sha256: deadbeef\n"
+        "source_media_type: application/pdf\n"
+        "---\n\n# Gone\n\nOriginal was deleted.\n",
+        encoding="utf-8",
+    )
+    (sample_vault / "raw" / "_originals").mkdir(parents=True)
+    (sample_vault / "raw" / "_originals" / "unhashed.pdf").write_bytes(b"%PDF-1.4\n")
+    (sample_vault / "raw" / "unhashed-artifact.md").write_text(
+        "---\n"
+        "title: Unhashed\n"
+        "source_artifact: raw/_originals/unhashed.pdf\n"
+        "---\n\n# Unhashed\n\nNo hash was recorded.\n",
+        encoding="utf-8",
+    )
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        gone = r.source("gone-artifact")
+        assert gone is not None and "MISSING" in gone
+        unhashed = r.source("unhashed-artifact")
+        assert unhashed is not None and "unverifiable" in unhashed
+        assert "unknown" in unhashed, "media type is absent, so say so"
     finally:
         idx.close()
