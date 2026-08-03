@@ -6,9 +6,11 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-08-02 (v0.3.1). The retained-original and citation-chain
-entries were re-verified for the `vault-engine source` fix in that release;
-the rest carry the v0.3.0 verification date.
+Last updated: 2026-08-03. The retained-original, citation-chain, and
+`fetch_url` test-coverage entries were re-verified against `add <url>`
+retaining its original (Unreleased); the retained-original entries were last
+re-verified for the `vault-engine source` fix in v0.3.1, and the rest carry
+the v0.3.0 verification date.
 
 ## Capability gaps
 
@@ -31,9 +33,13 @@ a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
 - **No docx, epub, html-on-disk, or plain `.txt`.** There is no extraction
   path for any of them and none is planned in the repo.
 - **The retained original stays unindexed, and nothing re-verifies it in the
-  background.** `vault_reader.iter_pages` still globs
+  background.** Applies to both adapters: since Unreleased `add <url>` also
+  retains its original, so `raw/_originals/` now holds `.html` / `.xhtml` /
+  `.txt` / `.bin` files alongside the PDFs, and the vault-growth cost ADR 0006
+  lists as a known negative now applies to every ingest rather than only to
+  PDF-heavy vaults. `vault_reader.iter_pages` still globs
   `vault_path.rglob("*.md")`, so nothing indexes `raw/_originals/`. Since
-  Unreleased, `vault-engine source <slug>` re-hashes the retained original
+  v0.3.1, `vault-engine source <slug>` re-hashes the retained original
   and reports `integrity: ok` / `MISMATCH` / `MISSING` against the recorded
   `source_sha256` — but only when you ask for that one page. Nothing sweeps
   the vault, and neither `status` nor `reindex` notices a deleted or altered
@@ -106,12 +112,12 @@ chain:
   verbatim.
 - Nothing the engine ingests is chainable. `CitationAssembler._walk` follows a
   `sources:` frontmatter list and resolves originals through `raw_path`, and
-  no adapter writes either field. `add_pdf` writes ADR 0006's
-  `source_artifact` / `source_sha256` / `source_media_type`, which as of
-  Unreleased only `retrieval.source` reads — `vault-engine source <pdf-slug>`
-  now reports the retained original and its integrity, but the assembler still
-  knows nothing about `source_artifact`, so citation depth on a PDF-ingested
-  page is still zero.
+  no adapter writes either field. Both `add_pdf` and (since Unreleased)
+  `add_url` write ADR 0006's `source_artifact` / `source_sha256` /
+  `source_media_type`, which only `retrieval.source` reads —
+  `vault-engine source <slug>` reports the retained original and its integrity
+  for a page ingested either way, but the assembler still knows nothing about
+  `source_artifact`, so citation depth on an ingested page is still zero.
 
 The eval fixtures pass because `tests/fixtures/sample_vault` is hand-authored
 to the `raw_path` convention the adapters do not emit. On a vault built with
@@ -265,11 +271,12 @@ would unblock that. Out of scope unless usage demands it.
 
 ## Test coverage gaps
 
-- `url_ingester.fetch_url` has exactly one end-to-end test, covering the
-  cloud-metadata-IP refusal via a monkeypatched `getaddrinfo`. The success
-  path, the redirect chain, the content-type refusal, and the size cap are
-  covered only at the level of their helper functions, never through
-  `fetch_url` against a mocked HTTP transport.
+- `url_ingester.fetch_url` is tested end to end for the cloud-metadata-IP
+  refusal (monkeypatched `getaddrinfo`) and, since Unreleased, for the success
+  path against a canned response: that it returns the wire bytes undecoded,
+  the charset-decoded text, and the declared media type. The redirect chain,
+  the content-type refusal, and the size cap are still covered only at the
+  level of their helper functions, never through `fetch_url` itself.
 - Watcher tests use timing-sensitive sleeps (up to 0.3s) and may flake on
   slow CI runners.
 - `community.compute_communities` is tested directly, and

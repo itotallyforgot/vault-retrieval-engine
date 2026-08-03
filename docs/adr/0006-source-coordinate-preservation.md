@@ -88,3 +88,13 @@ Revisit if:
 - `add <url>` starts retaining originals. Today it writes none of these fields, so half the ingestion surface is outside this decision.
 - Retained originals prove too large for vault sync, which would force the machine-local option this ADR rejects, and with it a portability tradeoff worth its own decision.
 - Anything starts reading these fields from a transport. They are written and read by `source` today; no HTTP or MCP surface returns them.
+
+## Revisit log
+
+Appended rather than edited into the prose above, which is a record of what was decided on the date it was decided.
+
+**2026-08-03 — the `add <url>` trigger fired.** `add_url` now retains the fetched original under `raw/_originals/` and writes all three fields, so the whole ingestion surface is inside this decision. Two statements above are superseded by that and are left standing as written: the Consequences negative that "`add <url>` still handles HTML only and writes none of them", and the revisit trigger itself.
+
+What retention chose, for the next reader: the **undecoded response body**, not the extracted article and not a re-encoding of it, because the exact-copy argument in Context is an argument for the bytes that crossed the wire — a hash of `resp.text.encode("utf-8")` would attest to this engine's transcoding rather than to the server's response. The filename extension and `source_media_type` come from the declared `Content-Type`; a response that declares none is retained as `.bin` with an empty media type rather than assumed to be HTML.
+
+Two things this does not change. The vault-growth negative now applies to every ingest rather than mostly to PDF-heavy vaults, since a retained HTML page is typically several times the size of the markdown extracted from it — bounded per artifact by the fetch's existing 10 MiB cap, but no longer occasional. And nothing sweeps `raw/_originals/`, so the on-demand-only verification recorded above is unchanged.
