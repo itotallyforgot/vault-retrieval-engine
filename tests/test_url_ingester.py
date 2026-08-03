@@ -2,21 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
 import socket
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 
+import frontmatter
+import httpx
 import pytest
 
 import vault_engine.url_ingester as url_ingester
 from vault_engine.url_ingester import (
     ExtractedArticle,
+    FetchedDocument,
     FetchError,
     _pinned_url,
     _resolve_and_validate,
+    _suffix_for_media_type,
     _validate_target,
+    add_url,
     extract_article,
+    fetch_url,
     slugify_for_raw,
+    write_original,
     write_raw_file,
 )
 
@@ -263,3 +271,170 @@ def test_fetch_url_blocks_internal_metadata_endpoint(monkeypatch):
     monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("169.254.169.254"))
     with pytest.raises(FetchError, match="private/loopback/reserved"):
         url_ingester.fetch_url("http://metadata.evil.example/latest/meta-data/")
+
+
+# --- ADR 0006: the URL adapter retains the fetched original ---------------
+
+
+def _serve(monkeypatch, body: bytes, content_type: str | None = "text/html; charset=utf-8"):
+    """Answer the next fetch_url with ``body`` and ``content_type``.
+
+    No socket is opened: DNS is stubbed to a public IP so the SSRF guard
+    passes, and `httpx.Client.get` is replaced with a canned response. CI has
+    no network egress, and the loopback address a local test server would bind
+    is exactly what `_resolve_and_validate` refuses.
+    """
+    headers = {} if content_type is None else {"content-type": content_type}
+    monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo("93.184.216.34"))
+
+    def _get(self, url, **kw):
+        return httpx.Response(200, headers=headers, content=body, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.Client, "get", _get)
+
+
+def test_fetch_url_returns_wire_bytes_declared_type_and_decoded_text(monkeypatch):
+    """Retention hashes what the server sent, so fetch_url has to hand back the
+    undecoded bytes alongside the text extraction works on."""
+    raw = "<html><body><p>caf\xe9</p></body></html>".encode("iso-8859-1")
+    _serve(monkeypatch, raw, "text/html; charset=iso-8859-1")
+
+    doc = fetch_url("https://example.com/x")
+    assert isinstance(doc, FetchedDocument)
+    assert doc.content == raw, "must be the bytes off the wire, not a re-encode"
+    assert doc.media_type == "text/html", "charset param is not part of the media type"
+    assert "café" in doc.text, "text still honours the declared charset"
+
+
+def test_fetch_url_reports_no_media_type_when_the_server_declares_none(monkeypatch):
+    _serve(monkeypatch, b"<html><body><p>hi</p></body></html>", content_type=None)
+    assert fetch_url("https://example.com/x").media_type == ""
+
+
+def test_suffix_for_media_type_covers_every_allowed_type():
+    assert _suffix_for_media_type("text/html") == ".html"
+    assert _suffix_for_media_type("application/xhtml+xml") == ".xhtml"
+    assert _suffix_for_media_type("text/plain") == ".txt"
+    # A server that declared nothing (or something unmapped) gets no guess.
+    assert _suffix_for_media_type("") == ".bin"
+    assert _suffix_for_media_type("text/markdown") == ".bin"
+
+
+def test_add_url_retains_original_and_records_identity(tmp_path: Path, monkeypatch):
+    """ADR 0006 for the other half of the ingestion surface."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    raw = GOLDEN_HTML.encode("utf-8")
+    _serve(monkeypatch, raw)
+
+    page = add_url(vault, "https://example.com/read-a-paper")
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+
+    assert post["source_type"] == "article"
+    assert post["source"] == "https://example.com/read-a-paper"
+    assert post["source_media_type"] == "text/html"
+
+    original = vault / str(post["source_artifact"])
+    assert original.is_file(), "source_artifact must resolve inside the vault"
+    assert original.parent == vault / "raw" / "_originals"
+    assert original.suffix == ".html"
+    assert original.read_bytes() == raw, "the retained original must be the unaltered wire bytes"
+    assert post["source_sha256"] == hashlib.sha256(raw).hexdigest()
+    # The derived markdown is still the extraction, not the raw HTML.
+    assert "Three-Pass Approach" in post.content
+    assert "<html>" not in post.content
+
+
+def test_add_url_retention_is_byte_exact_for_a_non_utf8_page(tmp_path: Path, monkeypatch):
+    """Hashing `resp.text.encode()` would record a digest of a re-encoding that
+    never crossed the wire, and the integrity check would then be a check of
+    our own transcoding."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    raw = "<html><head><title>Caf\xe9</title></head><body><p>Caf\xe9 prose here.</p></body></html>".encode(
+        "iso-8859-1"
+    )
+    _serve(monkeypatch, raw, "text/html; charset=iso-8859-1")
+
+    page = add_url(vault, "https://example.com/cafe")
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+    original = vault / str(post["source_artifact"])
+    assert original.read_bytes() == raw
+    assert post["source_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert raw.decode("utf-8", "replace").encode("utf-8") != raw, "fixture must be non-UTF-8"
+
+
+def test_add_url_extension_follows_the_declared_type(tmp_path: Path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _serve(monkeypatch, b"Plain prose, no markup at all.", "text/plain")
+    page = add_url(vault, "https://example.com/notes.txt", title_override="Notes")
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+    assert post["source_media_type"] == "text/plain"
+    assert (vault / str(post["source_artifact"])).suffix == ".txt"
+
+
+def test_add_url_records_no_media_type_it_was_not_given(tmp_path: Path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _serve(monkeypatch, GOLDEN_HTML.encode("utf-8"), content_type=None)
+    page = add_url(vault, "https://example.com/read-a-paper")
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+    assert post["source_media_type"] == "", "a guessed media type is worse than none"
+    assert (vault / str(post["source_artifact"])).suffix == ".bin"
+
+
+def test_add_url_page_write_failure_leaves_no_retained_original(tmp_path: Path, monkeypatch):
+    """Same orphan guard `add_pdf` has: the original is retained first, so a
+    failure writing the page must roll it back."""
+    vault = tmp_path / "vault"
+    (vault / "raw").mkdir(parents=True)
+    slug = slugify_for_raw("Orphan", on_date=datetime.now(tz=UTC).date())
+    (vault / "raw" / f"{slug}.md").write_text("pre-existing page")
+    _serve(monkeypatch, GOLDEN_HTML.encode("utf-8"))
+
+    with pytest.raises(FileExistsError):
+        add_url(vault, "https://example.com/x", title_override="Orphan")
+    assert not (vault / "raw" / "_originals" / f"{slug}.html").exists()
+
+
+def test_add_url_overwrite_replaces_both_page_and_original(tmp_path: Path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    _serve(monkeypatch, GOLDEN_HTML.encode("utf-8"))
+    add_url(vault, "https://example.com/x", title_override="Dupe")
+    with pytest.raises(FileExistsError):
+        add_url(vault, "https://example.com/x", title_override="Dupe")
+
+    second = b"<html><body><p>Rewritten body of the article.</p></body></html>"
+    _serve(monkeypatch, second)
+    page = add_url(vault, "https://example.com/x", title_override="Dupe", overwrite=True)
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+    assert (vault / str(post["source_artifact"])).read_bytes() == second
+    assert post["source_sha256"] == hashlib.sha256(second).hexdigest()
+
+
+def test_write_original_refuses_symlinked_originals_directory(tmp_path: Path):
+    """The guard `pdf_ingester.write_original` used to own, now shared. Anchored
+    to the vault root, not to a resolved originals dir — resolving that first
+    makes the check a tautology a symlinked `raw/_originals` walks through."""
+    vault = tmp_path / "vault"
+    (vault / "raw").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (vault / "raw" / "_originals").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(FetchError, match="escapes"):
+        write_original(vault, "escape", b"<html>", ".html", overwrite=True)
+    assert not (outside / "escape.html").exists(), "wrote outside the vault"
+
+
+def test_write_original_refuses_to_replace_silently(tmp_path: Path):
+    """Replacing a retained original invalidates the `source_sha256` some page
+    already recorded against it."""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    write_original(vault, "keep", b"first", ".html")
+    with pytest.raises(FileExistsError):
+        write_original(vault, "keep", b"second", ".html")
+    assert (vault / "raw" / "_originals" / "keep.html").read_bytes() == b"first"

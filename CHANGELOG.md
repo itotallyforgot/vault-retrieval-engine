@@ -25,8 +25,37 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
   is the only coordinate a chunk has, so a splitter that relabelled its
   sub-chunks would silently destroy the page number of every PDF-ingested
   page. Covered by `tests/test_chunker.py` and the PDF-shaped case there.
+- **`add <url>` retains the fetched original** and writes ADR 0006's
+  `source_artifact` / `source_sha256` / `source_media_type`, closing the last
+  unresolved negative that ADR listed: half the ingestion surface used to
+  write none of them, so `vault-engine source` had nothing to report for a
+  URL-ingested page. What is retained is the **undecoded response body**, not
+  the extracted article and not a re-encoding of it — the ADR's argument is
+  for the unaltered original, and hashing `resp.text.encode("utf-8")` would
+  record a digest of our own transcoding rather than of what the server sent.
+  The retained file is named for the declared `Content-Type`
+  (`text/html` → `.html`, `application/xhtml+xml` → `.xhtml`,
+  `text/plain` → `.txt`); a response that declares no type is retained as
+  `.bin` with an empty `source_media_type`, because a guessed type is one the
+  integrity check cannot catch. Retention is bounded by `fetch_url`'s existing
+  10 MiB size cap, which is applied to the same bytes that get written, so
+  nothing lands in the vault that the fetch would not already have accepted.
 
 ### Changed
+- `url_ingester.fetch_url` returns a `FetchedDocument` (raw bytes, decoded
+  text, declared media type) instead of a bare `str`. Retention needs the
+  bytes and the media type, and returning only `resp.text` threw both away.
+  Behaviour-compatible for the CLI; a source-level break for anyone calling
+  `fetch_url` directly.
+- `pdf_ingester.write_original` moved into `url_ingester` and took a `suffix`
+  argument, so both adapters share one retention write. Its two guards are
+  load-bearing and now exist once rather than once per adapter: destinations
+  are confined to the vault root (anchored to the root, not to a resolved
+  `raw/_originals`, so a symlinked originals directory cannot escape), and an
+  existing retained original is never silently replaced, since that would
+  invalidate the `source_sha256` some page already recorded against it.
+  `pdf_ingester.write_original` remains as a thin wrapper that keeps raising
+  `PdfIngestError`.
 - `chunk_page` takes `max_tokens` / `min_tokens` keyword arguments,
   defaulting to the `EngineConfig` values. Existing positional calls are
   unaffected.

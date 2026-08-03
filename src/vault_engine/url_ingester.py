@@ -6,7 +6,13 @@ into the wiki" job. This module owns the scrape half:
   fetch_url     — HTTP GET with SSRF guard, size cap, redirect cap
   extract_article — readability/trafilatura-based content extraction
   slugify_for_raw — date-prefixed kebab-case filename
+  write_original — retains a fetched artifact under <vault>/raw/_originals/
   write_raw_file — assembles frontmatter + body, writes to <vault>/raw/
+
+Per ADR 0006 the bytes that came off the wire are retained and identified in
+the derived page's frontmatter (`source_artifact`, `source_sha256`,
+`source_media_type`), so a citation chain has a way back to the unaltered
+original and a way to detect that the extraction has drifted from it.
 
 The output is a markdown file with `ingested: false` frontmatter, ready
 for `/vault ingest` (or batch ingest) to merge into the wiki. The engine
@@ -15,6 +21,7 @@ the source — that is judgment work that belongs to the user + LLM
 synthesis pass, not to a scraper.
 """
 
+import hashlib
 import ipaddress
 import re
 import socket
@@ -32,15 +39,41 @@ _DEFAULT_TIMEOUT_S = 15.0
 _DEFAULT_MAX_REDIRECTS = 5
 _DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
 _ALLOWED_SCHEMES = ("http", "https")
-_ALLOWED_CONTENT_TYPES = (
-    "text/html",
-    "application/xhtml+xml",
-    "text/plain",
-)
+
+# The media types this adapter accepts, and the extension a retained original
+# of each gets. One mapping rather than two lists, so an accepted type can
+# never be one the retention path has no filename for.
+_ORIGINAL_SUFFIXES = {
+    "text/html": ".html",
+    "application/xhtml+xml": ".xhtml",
+    "text/plain": ".txt",
+}
+_ALLOWED_CONTENT_TYPES = tuple(_ORIGINAL_SUFFIXES)
+# A response carrying no Content-Type is still accepted (it always was), but
+# the retained bytes are then of unknown type and get a neutral extension
+# rather than an assumed one.
+_UNKNOWN_SUFFIX = ".bin"
 
 
 class FetchError(Exception):
     """Raised when a URL fetch fails for any reason (network, security, size)."""
+
+
+@dataclass
+class FetchedDocument:
+    """What came off the wire.
+
+    ``content`` is the undecoded response body — the thing ADR 0006 retains
+    and hashes, because a re-encode of ``text`` is not what the server sent
+    and a hash of it would attest to our own transcoding. ``text`` is httpx's
+    decoding of those bytes using the declared charset, which is what
+    extraction runs on. ``media_type`` is the Content-Type with its parameters
+    stripped, or ``""`` if the server declared none.
+    """
+
+    content: bytes
+    text: str
+    media_type: str
 
 
 @dataclass
@@ -159,7 +192,7 @@ def fetch_url(
     timeout: float = _DEFAULT_TIMEOUT_S,
     max_redirects: int = _DEFAULT_MAX_REDIRECTS,
     max_bytes: int = _DEFAULT_MAX_BYTES,
-) -> str:
+) -> FetchedDocument:
     """HTTP GET with SSRF, redirect, and size protections.
 
     - The original URL and every redirect target are resolved and validated
@@ -171,8 +204,13 @@ def fetch_url(
       still rides in the ``Host`` header and TLS SNI, so HTTP routing and
       certificate verification are unchanged.
     - Redirect count capped (default 5); each hop is re-validated and re-pinned.
-    - Response size capped (default 10 MiB).
+    - Response size capped (default 10 MiB). The cap applies to the bytes
+      returned, so it also bounds what ``add_url`` retains on disk.
     - Content-Type checked before reading body.
+
+    Returns:
+        A :class:`FetchedDocument` carrying the raw bytes (for retention and
+        hashing), their decoding (for extraction), and the declared media type.
 
     Raises:
         FetchError: any disallowed condition (private IP, redirect loop,
@@ -223,7 +261,7 @@ def fetch_url(
                 body = resp.content
                 if len(body) > max_bytes:
                     raise FetchError(f"response is {len(body)} bytes, max is {max_bytes}")
-                return resp.text
+                return FetchedDocument(content=body, text=resp.text, media_type=ctype)
             raise FetchError(f"redirect cap ({max_redirects}) exceeded")
     except httpx.HTTPError as e:
         raise FetchError(f"http error: {e}") from e
@@ -319,6 +357,54 @@ def slugify_for_raw(title: str, on_date: date | None = None) -> str:
     if len(full) > 100:
         full = full[:100].rstrip("-")
     return full
+
+
+def _suffix_for_media_type(media_type: str) -> str:
+    """Filename extension for a retained original of ``media_type``.
+
+    Unmapped or absent types get ``.bin``: the point of retention is to keep
+    what the server sent, and naming it something it may not be is a guess the
+    integrity check cannot catch.
+    """
+    return _ORIGINAL_SUFFIXES.get(media_type, _UNKNOWN_SUFFIX)
+
+
+def write_original(
+    vault_path: Path, slug: str, data: bytes, suffix: str, *, overwrite: bool = False
+) -> Path:
+    """Retain source bytes at `<vault>/raw/_originals/<slug><suffix>` (ADR 0006).
+
+    Shared by every ingestion adapter that retains an original, so the two
+    guards below exist once rather than once per adapter.
+
+    Mirrors :func:`write_raw_file`'s traversal guard: the resolved destination
+    must stay inside the resolved vault root, which refuses both a destination
+    symlink pointing out of the vault and a symlinked `raw/_originals`
+    directory.
+
+    Raises:
+        FetchError: destination escapes the vault root.
+        FileExistsError: destination exists and ``overwrite`` is False.
+            Overwriting silently would invalidate the ``source_sha256``
+            already recorded by whichever page retained that original.
+    """
+    vault_root = vault_path.resolve()
+    originals_dir = vault_root / "raw" / "_originals"
+    originals_dir.mkdir(parents=True, exist_ok=True)
+    dest = (originals_dir / f"{slug}{suffix}").resolve()
+    try:
+        # Anchored to the vault root, not to a resolved originals_dir: if
+        # `raw/_originals` is itself a symlink out of the vault, resolving it
+        # first makes this check a tautology that always passes.
+        dest.relative_to(vault_root)
+    except ValueError as e:
+        raise FetchError(f"refusing write: original {dest} escapes vault root {vault_root}") from e
+    if dest.exists() and not overwrite:
+        raise FileExistsError(
+            f"retained original already exists: {dest} -- pass overwrite=True to replace."
+        )
+    dest.write_bytes(data)
+    return dest
 
 
 def write_raw_file(
@@ -424,15 +510,22 @@ def add_url(
     overwrite: bool = False,
     title_override: str | None = None,
 ) -> Path:
-    """End-to-end: fetch URL, extract, write to raw/. Returns the path written.
+    """End-to-end: fetch URL, retain the original, write to raw/.
+
+    Returns the path of the `raw/` page written. Per ADR 0006 the fetched
+    bytes are also retained under `raw/_originals/` and identified in that
+    page's frontmatter, so the extraction can be checked against the thing it
+    was made from. What is retained is the undecoded response body, not the
+    extracted article: the ADR's argument is for the unaltered original, and
+    only the original is the thing a citation rule lets you cite.
 
     The user then runs `/vault ingest <path>` to merge into the wiki — this
     function intentionally does NOT touch the wiki itself. The split keeps
     the engine deterministic (no LLM judgment) and lets the user review
     every scrape before it lands in topic pages.
     """
-    html = fetch_url(url)
-    article = extract_article(html, url=url)
+    doc = fetch_url(url)
+    article = extract_article(doc.text, url=url)
     if title_override:
         article = ExtractedArticle(
             title=_strip_unsafe_chars(title_override),
@@ -441,10 +534,35 @@ def add_url(
             author=article.author,
             published=article.published,
         )
-    clipped_at = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return write_raw_file(
-        vault_path=vault_path,
-        article=article,
-        clipped_at=clipped_at,
+    now = datetime.now(tz=UTC)
+    # write_raw_file derives its slug from the YYYY-MM-DD prefix of clipped_at
+    # and the title, so deriving both from `now` keeps the two names in step.
+    clipped_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    slug = slugify_for_raw(article.title, on_date=now.date())
+
+    original = write_original(
+        vault_path,
+        slug,
+        doc.content,
+        _suffix_for_media_type(doc.media_type),
         overwrite=overwrite,
     )
+    rel_original = original.relative_to(vault_path.resolve()).as_posix()
+
+    try:
+        return write_raw_file(
+            vault_path=vault_path,
+            article=article,
+            clipped_at=clipped_at,
+            overwrite=overwrite,
+            extra_frontmatter={
+                "source_artifact": rel_original,
+                "source_sha256": hashlib.sha256(doc.content).hexdigest(),
+                "source_media_type": doc.media_type,
+            },
+        )
+    except BaseException:
+        # The original is retained first so its own guards run before anything
+        # is written, but a retained artifact no page references is an orphan.
+        original.unlink(missing_ok=True)
+        raise
