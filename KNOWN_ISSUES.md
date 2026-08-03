@@ -6,11 +6,13 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-08-03. The retained-original, citation-chain, and
-`fetch_url` test-coverage entries were re-verified against `add <url>`
-retaining its original (Unreleased); the retained-original entries were last
-re-verified for the `vault-engine source` fix in v0.3.1, and the rest carry
-the v0.3.0 verification date.
+Last updated: 2026-08-03, for v0.4.0. Every entry below was re-read against
+the code on that date. The chunker, retained-original, citation-chain, and
+`fetch_url` test-coverage entries were rewritten for v0.4.0's chunk size cap
+and for `add <url>` retaining its original. The `vault-engine status`
+observability entry and the ADR-status paragraph were re-checked against the
+CLI and `docs/adr/` on the same date. The rest carry the v0.3.1 or v0.3.0
+verification date, noted in place where it matters.
 
 ## Capability gaps
 
@@ -33,7 +35,7 @@ a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
 - **No docx, epub, html-on-disk, or plain `.txt`.** There is no extraction
   path for any of them and none is planned in the repo.
 - **The retained original stays unindexed, and nothing re-verifies it in the
-  background.** Applies to both adapters: since Unreleased `add <url>` also
+  background.** Applies to both adapters: since v0.4.0 `add <url>` also
   retains its original, so `raw/_originals/` now holds `.html` / `.xhtml` /
   `.txt` / `.bin` files alongside the PDFs, and the vault-growth cost ADR 0006
   lists as a known negative now applies to every ingest rather than only to
@@ -58,7 +60,7 @@ a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
 
 ### The chunker's size cap counts words, not the embedder's tokens
 
-Fixed since Unreleased: `chunk_page` splits a section over
+Fixed in v0.4.0: `chunk_page` splits a section over
 `chunk_max_tokens` on paragraph boundaries (hard-splitting on words when a
 single paragraph exceeds the cap on its own), so a page with one H1 and
 8,000 words is no longer one chunk with one blended embedding. Both
@@ -100,7 +102,10 @@ them on both index paths. What that still does not give you:
 ### The citation chain reaches no user-facing surface
 
 `CitationAssembler` is imported by exactly one non-test module: `eval.py`. Not
-`service.py`, not `http_server.py`, not `mcp_server.py`, not `cli.py`. So
+`service.py`, not `http_server.py`, not `mcp_server.py`, not `cli.py`.
+(`mcp_server.py` does import from `citations.py`, but the function it takes is
+`build_citation_chain`, the graph shortest-path walk behind the `shortest_path`
+tool, which is a path between two pages and not a per-hit evidence trail.) So
 `vault-engine search`, `POST /query`, and the MCP `query_graph` tool all return
 hits and no chain. The assembler works and the eval harness asserts on it
 (`min_citation_depth`, `expected_citations`); nothing a user touches calls it.
@@ -112,7 +117,7 @@ chain:
   verbatim.
 - Nothing the engine ingests is chainable. `CitationAssembler._walk` follows a
   `sources:` frontmatter list and resolves originals through `raw_path`, and
-  no adapter writes either field. Both `add_pdf` and (since Unreleased)
+  no adapter writes either field. Both `add_pdf` and (since v0.4.0)
   `add_url` write ADR 0006's `source_artifact` / `source_sha256` /
   `source_media_type`, which only `retrieval.source` reads —
   `vault-engine source <slug>` reports the retained original and its integrity
@@ -272,7 +277,7 @@ would unblock that. Out of scope unless usage demands it.
 ## Test coverage gaps
 
 - `url_ingester.fetch_url` is tested end to end for the cloud-metadata-IP
-  refusal (monkeypatched `getaddrinfo`) and, since Unreleased, for the success
+  refusal (monkeypatched `getaddrinfo`) and, since v0.4.0, for the success
   path against a canned response: that it returns the wire bytes undecoded,
   the charset-decoded text, and the declared media type. The redirect chain,
   the content-type refusal, and the size cap are still covered only at the
@@ -290,9 +295,13 @@ Seven ADRs exist and all seven are on `main`, indexed in
 `docs/adr/README.md`: sqlite-vec (0001), NetworkX (0002), the 0.85 INFERRED
 threshold (0003), router tiers (0004), the mxbai default model (0005),
 source-coordinate preservation (0006), and the lexical RRF channel (0007).
-Six are Accepted. 0006 is still Proposed: it decided artifact retention and
-deliberately stopped short of deciding how a coordinate is stored, which is
-the open half described under Roadmap below.
+All seven are Accepted; 0006 has been Accepted since 2026-08-02, and this
+file claimed it was still Proposed through v0.3.1 and v0.4.0's two feature
+PRs. What is genuinely open is narrower than that claim: 0006 decided
+artifact retention and deliberately stopped short of deciding how a
+coordinate is stored, which is the open half described under Roadmap below.
+0006 also carries a dated revisit log rather than an edited decision, noting
+that its `add <url>` trigger fired in v0.4.0.
 
 ## Roadmap
 

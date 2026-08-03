@@ -7,7 +7,49 @@ this project follows [Semantic Versioning](https://semver.org/).
 Entries under `Unreleased` may still slip. Carried-over gaps are tracked
 in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
+A release that costs an existing user something on upgrade leads with an
+`### Upgrade notes` section, placed above `Added` / `Changed` / `Fixed` so
+it is read before the feature list. A release with no such cost omits the
+section rather than filling it with "nothing to do".
+
 ## [Unreleased]
+
+Nothing yet.
+
+## [0.4.0] - 2026-08-03
+
+### Upgrade notes
+
+**Your first `reindex` after upgrading re-chunks the vault and re-embeds
+every page that re-chunks.** The chunker now caps section size, so any
+header section over `chunk_max_tokens` (default 512 words) becomes several
+chunks instead of one.
+
+- **What triggers it:** any ordinary `vault-engine reindex`, or
+  `Service.start()`, which rebuilds at startup. **`--force` is not needed
+  and should not be used** here: `_index_page_chunks` deletes the chunk
+  indices the new chunk set no longer has, so no stale rows survive a
+  normal reindex. `--force` would wipe the store and re-embed pages that
+  did not need it.
+- **What it costs:** splitting renumbers every chunk after the split point,
+  and the encode-skip is keyed on `(chunk_idx, checksum)`, so a page that
+  re-chunks is re-embedded in full, including the chunks whose text did not
+  change. On the real model that is the cost of encoding those pages from
+  scratch. On a vault of mostly short pages it is close to nothing; on one
+  with long unbroken sections it is most of a cold rebuild.
+- **What is skipped:** a page whose sections were already under the cap
+  chunks identically, keeps its checksums, and is not re-encoded. The
+  encode-skip works exactly as before for it.
+- **Disk, not compute:** `add <url>` now retains the fetched original under
+  `raw/_originals/`, so every URL ingested from here on writes a second
+  file alongside the markdown. A retained HTML page is typically several
+  times the size of the text extracted from it. Ingestion growth used to be
+  a PDF-heavy-vault concern; it now applies to every ingest. Each artifact
+  is bounded by the fetch's existing 10 MiB cap. Pages ingested before this
+  release are unaffected: nothing backfills an original that was never kept.
+- **Calling `url_ingester.fetch_url` directly?** It returns a
+  `FetchedDocument` now, not a `str`. Read `.text` where you read the return
+  value before. The CLI and every other in-repo caller are unaffected.
 
 ### Added
 - The chunker enforces a size cap. A header section longer than
@@ -74,15 +116,6 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
   removed: it put page 2's text into a chunk labelled `p. 1` on a
   PDF-ingested page, and it took the mock eval rig from 6/6 to 5/6. An
   undersized section is still emitted alone.
-
-### Upgrade note
-- A cache built before this change re-chunks on the next
-  `vault-engine reindex` or `Service.start()`. `--force` is not needed and
-  no stale rows survive: `_index_page_chunks` deletes indices the new chunk
-  set no longer has. Splitting does renumber every chunk after the split
-  point, and the encode-skip is keyed on `(chunk_idx, checksum)`, so every
-  chunk of a re-chunked page is re-embedded even where its text is
-  unchanged. Pages that were already under the cap are skipped as before.
 
 ## [0.3.1] - 2026-08-02
 
@@ -605,7 +638,9 @@ land slug-schema migration, the Service-CLI refactor, full GraphQuery
 facade, and observability polish. See the v0.2.0 hardening epic
 (tracked in an internal issue tracker) for the full scope.
 
-[Unreleased]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/itotallyforgot/vault-retrieval-engine/releases/tag/v0.1.0
