@@ -1,12 +1,16 @@
+import hashlib
+import socket
 from pathlib import Path
 
 import frontmatter
+import httpx
 
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer
 from vault_engine.pdf_ingester import add_pdf
 from vault_engine.retrieval import Retrieval
+from vault_engine.url_ingester import add_url
 
 PDF_FIXTURE = Path(__file__).parent / "fixtures" / "two_page.pdf"
 
@@ -136,6 +140,49 @@ def test_source_reports_retained_original_for_pdf_page(sample_vault: Path, tmp_p
         assert str(post["source_artifact"]) in out
         assert str(post["source_sha256"]) in out
         assert str(post["source_media_type"]) in out
+        assert "integrity: ok" in out
+    finally:
+        idx.close()
+
+
+def test_source_reports_retained_original_for_url_page(
+    sample_vault: Path, tmp_path: Path, monkeypatch
+):
+    """The other half of the ingestion surface (ADR 0006 revisit trigger): a
+    page written by `add_url` must report its retained original exactly as a
+    PDF-ingested one does. No network: DNS is stubbed public and the GET is
+    canned, so the SSRF guard passes without a socket."""
+    raw = b"<html><head><title>Wire Article</title></head><body><article>"
+    raw += b"<h1>Wire Article</h1><p>Enough prose for the extractor to keep.</p>"
+    raw += b"</article></body></html>"
+
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *a, **kw: [
+            (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+        ],
+    )
+    monkeypatch.setattr(
+        httpx.Client,
+        "get",
+        lambda self, url, **kw: httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            content=raw,
+            request=httpx.Request("GET", url),
+        ),
+    )
+
+    page = add_url(sample_vault, "https://example.com/wire-article")
+    post = frontmatter.loads(page.read_text(encoding="utf-8"))
+    idx, r, _ = _open_indexed(sample_vault, tmp_path)
+    try:
+        out = r.source(page.stem)
+        assert out is not None, "source() must not report 'no raw source' for a URL page"
+        assert str(post["source_artifact"]) in out
+        assert "text/html" in out
+        assert hashlib.sha256(raw).hexdigest() in out
         assert "integrity: ok" in out
     finally:
         idx.close()

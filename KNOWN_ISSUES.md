@@ -6,9 +6,13 @@ installing it. Every entry below was re-verified against the code on the
 date in the header; entries that the code showed were already fixed have
 been deleted rather than left to rot.
 
-Last updated: 2026-08-02 (v0.3.1). The retained-original and citation-chain
-entries were re-verified for the `vault-engine source` fix in that release;
-the rest carry the v0.3.0 verification date.
+Last updated: 2026-08-03, for v0.4.0. Every entry below was re-read against
+the code on that date. The chunker, retained-original, citation-chain, and
+`fetch_url` test-coverage entries were rewritten for v0.4.0's chunk size cap
+and for `add <url>` retaining its original. The `vault-engine status`
+observability entry and the ADR-status paragraph were re-checked against the
+CLI and `docs/adr/` on the same date. The rest carry the v0.3.1 or v0.3.0
+verification date, noted in place where it matters.
 
 ## Capability gaps
 
@@ -31,9 +35,13 @@ a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
 - **No docx, epub, html-on-disk, or plain `.txt`.** There is no extraction
   path for any of them and none is planned in the repo.
 - **The retained original stays unindexed, and nothing re-verifies it in the
-  background.** `vault_reader.iter_pages` still globs
+  background.** Applies to both adapters: since v0.4.0 `add <url>` also
+  retains its original, so `raw/_originals/` now holds `.html` / `.xhtml` /
+  `.txt` / `.bin` files alongside the PDFs, and the vault-growth cost ADR 0006
+  lists as a known negative now applies to every ingest rather than only to
+  PDF-heavy vaults. `vault_reader.iter_pages` still globs
   `vault_path.rglob("*.md")`, so nothing indexes `raw/_originals/`. Since
-  Unreleased, `vault-engine source <slug>` re-hashes the retained original
+  v0.3.1, `vault-engine source <slug>` re-hashes the retained original
   and reports `integrity: ok` / `MISMATCH` / `MISSING` against the recorded
   `source_sha256` — but only when you ask for that one page. Nothing sweeps
   the vault, and neither `status` nor `reindex` notices a deleted or altered
@@ -50,37 +58,54 @@ a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
   compression bomb is refused rather than written as a page the indexer
   would silently skip forever.
 
-### The chunker has no size cap, and its docstring says otherwise
+### The chunker's size cap counts words, not the embedder's tokens
 
-`chunker.py` opens with:
+Fixed in v0.4.0: `chunk_page` splits a section over
+`chunk_max_tokens` on paragraph boundaries (hard-splitting on words when a
+single paragraph exceeds the cap on its own), so a page with one H1 and
+8,000 words is no longer one chunk with one blended embedding. Both
+`chunk_max_tokens` and `chunk_min_tokens` are now read — the indexer passes
+them on both index paths. What that still does not give you:
 
-> Chunks below a min size are merged into the next chunk; chunks above the
-> max size are split on paragraph boundaries.
-
-Neither behavior exists. `chunk_page` matches `^#{1,2}\s` (H1 and H2 only),
-slices the body between those matches, drops empty slices, and returns. No
-merge, no split, no length check anywhere in the function. `EngineConfig`
-does define `chunk_max_tokens: int = 512`, but the only reference to it in
-the entire repository outside that definition is a test asserting it is
-greater than zero. Nothing reads it.
-
-The practical consequence: a page with a single H1 and 8,000 words of body
-becomes one chunk. That chunk gets one embedding, so retrieval either
-returns the whole thing or none of it, and the vector is the mean of eight
-thousand words of unrelated material. Deeply-nested pages that use H3 and
-below for their real structure chunk as though that structure were not
-there. Header discipline in the vault is doing load-bearing work that the
-engine's own docstring implies it does not need to.
-
-The docstring has been corrected to describe actual behavior. The missing
-size cap is a real gap, not just a documentation bug.
+- **"Tokens" are whitespace words.** The chunker has no tokenizer and does
+  not load the model. English prose runs roughly 1.3 model tokens per word,
+  so a section packed to the default 512 is about 670 tokens to
+  mxbai-embed-large and is still truncated by its 512-token window. Set
+  `chunk_max_tokens` to ~380 if you want the cap to respect that window.
+  The gap between the cap and the model's real count is an approximation,
+  not an exactness claim.
+- **Undersized *sections* are still emitted alone.** Only an undersized
+  *remainder* of a split section folds back into its previous sibling.
+  Merging across a heading was implemented and then removed: on a
+  PDF-ingested page it put page 2's text into a chunk labelled `p. 1`
+  (`pdf_ingester` emits one `## p. N` H2 per printed page, and
+  `Chunk.heading` is the only coordinate a chunk carries), and it dropped
+  the mock eval rig from 6/6 to 5/6. So `chunk_min_tokens` bounds sliver
+  chunks produced by splitting, and nothing else. A 4-word section is still
+  a 4-word chunk.
+- **Folding a remainder can exceed the cap** by up to `chunk_min_tokens - 1`
+  words. Deliberate: a 20-word chunk is a worse vector than a 530-word one.
+- **H3 and below still do not chunk.** Deeply-nested pages whose real
+  structure lives at H3 are chunked as though that structure were not
+  there, capped by size alone.
+- **Existing caches converge on the next index, not automatically.** A
+  store built before the cap re-chunks on any `vault-engine reindex` or on
+  `Service.start()`; `--force` is not needed and no stale rows survive
+  (`_index_page_chunks` drops indices the new chunk set does not have).
+  The cost is real, though: splitting renumbers every chunk after the split
+  point, and the checksum-skip is keyed on `(chunk_idx, checksum)`, so
+  every chunk of a page that re-chunks is re-embedded even where its text
+  did not change.
 
 ## Architecture
 
 ### The citation chain reaches no user-facing surface
 
 `CitationAssembler` is imported by exactly one non-test module: `eval.py`. Not
-`service.py`, not `http_server.py`, not `mcp_server.py`, not `cli.py`. So
+`service.py`, not `http_server.py`, not `mcp_server.py`, not `cli.py`.
+(`mcp_server.py` does import from `citations.py`, but the function it takes is
+`build_citation_chain`, the graph shortest-path walk behind the `shortest_path`
+tool, which is a path between two pages and not a per-hit evidence trail.) So
 `vault-engine search`, `POST /query`, and the MCP `query_graph` tool all return
 hits and no chain. The assembler works and the eval harness asserts on it
 (`min_citation_depth`, `expected_citations`); nothing a user touches calls it.
@@ -92,12 +117,12 @@ chain:
   verbatim.
 - Nothing the engine ingests is chainable. `CitationAssembler._walk` follows a
   `sources:` frontmatter list and resolves originals through `raw_path`, and
-  no adapter writes either field. `add_pdf` writes ADR 0006's
-  `source_artifact` / `source_sha256` / `source_media_type`, which as of
-  Unreleased only `retrieval.source` reads — `vault-engine source <pdf-slug>`
-  now reports the retained original and its integrity, but the assembler still
-  knows nothing about `source_artifact`, so citation depth on a PDF-ingested
-  page is still zero.
+  no adapter writes either field. Both `add_pdf` and (since v0.4.0)
+  `add_url` write ADR 0006's `source_artifact` / `source_sha256` /
+  `source_media_type`, which only `retrieval.source` reads —
+  `vault-engine source <slug>` reports the retained original and its integrity
+  for a page ingested either way, but the assembler still knows nothing about
+  `source_artifact`, so citation depth on an ingested page is still zero.
 
 The eval fixtures pass because `tests/fixtures/sample_vault` is hand-authored
 to the `raw_path` convention the adapters do not emit. On a vault built with
@@ -251,11 +276,12 @@ would unblock that. Out of scope unless usage demands it.
 
 ## Test coverage gaps
 
-- `url_ingester.fetch_url` has exactly one end-to-end test, covering the
-  cloud-metadata-IP refusal via a monkeypatched `getaddrinfo`. The success
-  path, the redirect chain, the content-type refusal, and the size cap are
-  covered only at the level of their helper functions, never through
-  `fetch_url` against a mocked HTTP transport.
+- `url_ingester.fetch_url` is tested end to end for the cloud-metadata-IP
+  refusal (monkeypatched `getaddrinfo`) and, since v0.4.0, for the success
+  path against a canned response: that it returns the wire bytes undecoded,
+  the charset-decoded text, and the declared media type. The redirect chain,
+  the content-type refusal, and the size cap are still covered only at the
+  level of their helper functions, never through `fetch_url` itself.
 - Watcher tests use timing-sensitive sleeps (up to 0.3s) and may flake on
   slow CI runners.
 - `community.compute_communities` is tested directly, and
@@ -269,9 +295,13 @@ Seven ADRs exist and all seven are on `main`, indexed in
 `docs/adr/README.md`: sqlite-vec (0001), NetworkX (0002), the 0.85 INFERRED
 threshold (0003), router tiers (0004), the mxbai default model (0005),
 source-coordinate preservation (0006), and the lexical RRF channel (0007).
-Six are Accepted. 0006 is still Proposed: it decided artifact retention and
-deliberately stopped short of deciding how a coordinate is stored, which is
-the open half described under Roadmap below.
+All seven are Accepted; 0006 has been Accepted since 2026-08-02, and this
+file claimed it was still Proposed through v0.3.1 and v0.4.0's two feature
+PRs. What is genuinely open is narrower than that claim: 0006 decided
+artifact retention and deliberately stopped short of deciding how a
+coordinate is stored, which is the open half described under Roadmap below.
+0006 also carries a dated revisit log rather than an edited decision, noting
+that its `add <url>` trigger fired in v0.4.0.
 
 ## Roadmap
 

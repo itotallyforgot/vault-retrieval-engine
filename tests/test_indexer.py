@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 import vault_engine.vault_reader as vault_reader
+from vault_engine.chunker import chunk_page
 from vault_engine.config import EngineConfig
 from vault_engine.embedder import MockEmbedder
 from vault_engine.indexer import Indexer, IndexReport
@@ -112,6 +113,46 @@ def test_indexer_rebuild_drops_chunks_no_longer_present(sample_vault: Path, tmp_
         hits = idx.vec.search(np.ones(cfg.embedding_dim, dtype=np.float32), top_k=20)
         alpha_idxs = {h.chunk_idx for h in hits if h.page_slug == "alpha"}
         assert alpha_idxs == set(after.keys())
+    finally:
+        idx.close()
+
+
+def test_indexer_reindex_survives_shifting_chunk_indices(sample_vault: Path, tmp_path: Path):
+    """A section growing past the cap splits, which renumbers every chunk after
+    it. `chunk_meta` is keyed `(page_slug, chunk_idx)` and upserted by index, so
+    a shifted tail must land as an update, never as a stale leftover row.
+    """
+    cfg = EngineConfig(
+        vault_path=sample_vault,
+        cache_dir=tmp_path / "cache",
+        chunk_max_tokens=60,
+        chunk_min_tokens=32,
+    )
+    cfg.cache_dir.mkdir(parents=True, exist_ok=True)
+    alpha = sample_vault / "wiki" / "topics" / "alpha.md"
+    fm = "---\ntitle: Alpha\naliases: []\ntags: [topic]\nsources: []\nlast_updated: 2026-01-03\n---\n\n"
+    tail = "\n\n## Tail\n\n" + " ".join(["beta"] * 40) + "\n"
+    alpha.write_text(fm + "# Alpha\n\n" + " ".join(["word"] * 40) + tail, encoding="utf-8")
+
+    idx = Indexer(cfg=cfg, embedder=MockEmbedder(dim=cfg.embedding_dim))
+    idx.open()
+    try:
+        idx.rebuild()
+        assert set(idx.vec.get_checksums("alpha")) == {0, 1}
+
+        # Grow the first section past the cap: it splits, pushing ## Tail down.
+        alpha.write_text(fm + "# Alpha\n\n" + " ".join(["word"] * 200) + tail, encoding="utf-8")
+        idx.reindex_page(alpha)
+
+        stored = idx.vec.get_checksums("alpha")
+        expected = chunk_page(
+            "alpha",
+            vault_reader.read_page(alpha).body,
+            max_tokens=cfg.chunk_max_tokens,
+            min_tokens=cfg.chunk_min_tokens,
+        )
+        assert len(expected) > 2, "the oversized section did not split"
+        assert stored == {c.idx: c.checksum for c in expected}
     finally:
         idx.close()
 

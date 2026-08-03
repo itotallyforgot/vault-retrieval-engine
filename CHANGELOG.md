@@ -7,7 +7,115 @@ this project follows [Semantic Versioning](https://semver.org/).
 Entries under `Unreleased` may still slip. Carried-over gaps are tracked
 in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
+A release that costs an existing user something on upgrade leads with an
+`### Upgrade notes` section, placed above `Added` / `Changed` / `Fixed` so
+it is read before the feature list. A release with no such cost omits the
+section rather than filling it with "nothing to do".
+
 ## [Unreleased]
+
+Nothing yet.
+
+## [0.4.0] - 2026-08-03
+
+### Upgrade notes
+
+**Your first `reindex` after upgrading re-chunks the vault and re-embeds
+every page that re-chunks.** The chunker now caps section size, so any
+header section over `chunk_max_tokens` (default 512 words) becomes several
+chunks instead of one.
+
+- **What triggers it:** any ordinary `vault-engine reindex`, or
+  `Service.start()`, which rebuilds at startup. **`--force` is not needed
+  and should not be used** here: `_index_page_chunks` deletes the chunk
+  indices the new chunk set no longer has, so no stale rows survive a
+  normal reindex. `--force` would wipe the store and re-embed pages that
+  did not need it.
+- **What it costs:** splitting renumbers every chunk after the split point,
+  and the encode-skip is keyed on `(chunk_idx, checksum)`, so a page that
+  re-chunks is re-embedded in full, including the chunks whose text did not
+  change. On the real model that is the cost of encoding those pages from
+  scratch. On a vault of mostly short pages it is close to nothing; on one
+  with long unbroken sections it is most of a cold rebuild.
+- **What is skipped:** a page whose sections were already under the cap
+  chunks identically, keeps its checksums, and is not re-encoded. The
+  encode-skip works exactly as before for it.
+- **Disk, not compute:** `add <url>` now retains the fetched original under
+  `raw/_originals/`, so every URL ingested from here on writes a second
+  file alongside the markdown. A retained HTML page is typically several
+  times the size of the text extracted from it. Ingestion growth used to be
+  a PDF-heavy-vault concern; it now applies to every ingest. Each artifact
+  is bounded by the fetch's existing 10 MiB cap. Pages ingested before this
+  release are unaffected: nothing backfills an original that was never kept.
+- **Calling `url_ingester.fetch_url` directly?** It returns a
+  `FetchedDocument` now, not a `str`. Read `.text` where you read the return
+  value before. The CLI and every other in-repo caller are unaffected.
+
+### Added
+- The chunker enforces a size cap. A header section longer than
+  `EngineConfig.chunk_max_tokens` is split on paragraph boundaries with
+  greedy packing; a single paragraph that exceeds the cap on its own is
+  hard-split on word boundaries rather than emitted oversize. A page with
+  one H1 and 8,000 words used to be one chunk carrying one embedding — the
+  mean of 8,000 words of unrelated material — so retrieval returned all of
+  it or none of it. `chunk_max_tokens` and `chunk_min_tokens` were
+  referenced nowhere in `src/` before this; `Indexer` now passes both on
+  the `rebuild()` and `reindex_page()` paths, so they are live config
+  rather than documentation.
+- **Every sub-chunk of a split section carries that section's heading.**
+  `pdf_ingester` emits one `## p. N` H2 per printed page and `Chunk.heading`
+  is the only coordinate a chunk has, so a splitter that relabelled its
+  sub-chunks would silently destroy the page number of every PDF-ingested
+  page. Covered by `tests/test_chunker.py` and the PDF-shaped case there.
+- **`add <url>` retains the fetched original** and writes ADR 0006's
+  `source_artifact` / `source_sha256` / `source_media_type`, closing the last
+  unresolved negative that ADR listed: half the ingestion surface used to
+  write none of them, so `vault-engine source` had nothing to report for a
+  URL-ingested page. What is retained is the **undecoded response body**, not
+  the extracted article and not a re-encoding of it — the ADR's argument is
+  for the unaltered original, and hashing `resp.text.encode("utf-8")` would
+  record a digest of our own transcoding rather than of what the server sent.
+  The retained file is named for the declared `Content-Type`
+  (`text/html` → `.html`, `application/xhtml+xml` → `.xhtml`,
+  `text/plain` → `.txt`); a response that declares no type is retained as
+  `.bin` with an empty `source_media_type`, because a guessed type is one the
+  integrity check cannot catch. Retention is bounded by `fetch_url`'s existing
+  10 MiB size cap, which is applied to the same bytes that get written, so
+  nothing lands in the vault that the fetch would not already have accepted.
+
+### Changed
+- `url_ingester.fetch_url` returns a `FetchedDocument` (raw bytes, decoded
+  text, declared media type) instead of a bare `str`. Retention needs the
+  bytes and the media type, and returning only `resp.text` threw both away.
+  Behaviour-compatible for the CLI; a source-level break for anyone calling
+  `fetch_url` directly.
+- `pdf_ingester.write_original` moved into `url_ingester` and took a `suffix`
+  argument, so both adapters share one retention write. Its two guards are
+  load-bearing and now exist once rather than once per adapter: destinations
+  are confined to the vault root (anchored to the root, not to a resolved
+  `raw/_originals`, so a symlinked originals directory cannot escape), and an
+  existing retained original is never silently replaced, since that would
+  invalidate the `source_sha256` some page already recorded against it.
+  `pdf_ingester.write_original` remains as a thin wrapper that keeps raising
+  `PdfIngestError`.
+- `chunk_page` takes `max_tokens` / `min_tokens` keyword arguments,
+  defaulting to the `EngineConfig` values. Existing positional calls are
+  unaffected.
+- Sizes are counted in **whitespace-separated words, not the embedder's
+  tokens**. The chunker has no tokenizer and does not load the model.
+  English prose runs roughly 1.3 model tokens per word, so a section packed
+  to the default 512 is about 670 tokens to mxbai-embed-large and is still
+  truncated by its 512-token window; set `chunk_max_tokens` to ~380 if you
+  want the cap to respect it. The docstring says this rather than implying
+  an exact count.
+- `chunk_min_tokens` folds an undersized *remainder* of a split section back
+  into the previous sub-chunk (which may exceed `chunk_max_tokens` by up to
+  `chunk_min_tokens - 1` words — a 20-word chunk is a worse vector than a
+  530-word one). It does **not** merge across headings. Cross-section
+  merging, which the pre-fix docstring promised, was implemented and then
+  removed: it put page 2's text into a chunk labelled `p. 1` on a
+  PDF-ingested page, and it took the mock eval rig from 6/6 to 5/6. An
+  undersized section is still emitted alone.
 
 ## [0.3.1] - 2026-08-02
 
@@ -530,7 +638,9 @@ land slug-schema migration, the Service-CLI refactor, full GraphQuery
 facade, and observability polish. See the v0.2.0 hardening epic
 (tracked in an internal issue tracker) for the full scope.
 
-[Unreleased]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/itotallyforgot/vault-retrieval-engine/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/itotallyforgot/vault-retrieval-engine/releases/tag/v0.1.0

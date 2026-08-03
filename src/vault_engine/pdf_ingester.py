@@ -41,10 +41,12 @@ from pypdf import PdfReader
 
 from vault_engine.url_ingester import (
     ExtractedArticle,
+    FetchError,
     _strip_unsafe_chars,
     slugify_for_raw,
     write_raw_file,
 )
+from vault_engine.url_ingester import write_original as _write_original
 from vault_engine.vault_reader import _MAX_PAGE_BYTES, SkippedPage
 
 # Same 10 MiB ceiling `vault_reader._MAX_PAGE_BYTES` and `url_ingester`'s
@@ -135,38 +137,21 @@ def extract_pdf_markdown(pdf_path: Path, skipped: list[SkippedPage] | None = Non
 
 
 def write_original(vault_path: Path, slug: str, data: bytes, *, overwrite: bool = False) -> Path:
-    """Retain the source bytes at `<vault>/raw/_originals/<slug>.pdf`.
+    """Retain the source PDF at `<vault>/raw/_originals/<slug>.pdf`.
 
-    Mirrors :func:`url_ingester.write_raw_file`'s traversal guard: the
-    resolved destination must stay inside the resolved vault root, which
-    refuses both a destination symlink pointing out of the vault and a
-    symlinked `raw/_originals` directory.
+    Thin wrapper over the shared :func:`url_ingester.write_original`, which
+    owns the containment and no-silent-overwrite guards for every adapter that
+    retains an original. Only the error type is local, so a PDF failure still
+    reaches the CLI as a ``PdfIngestError``.
 
     Raises:
         PdfIngestError: destination escapes the vault root.
         FileExistsError: destination exists and ``overwrite`` is False.
-            Overwriting silently would invalidate the ``source_sha256``
-            already recorded by whichever page retained that original.
     """
-    vault_root = vault_path.resolve()
-    originals_dir = vault_root / "raw" / "_originals"
-    originals_dir.mkdir(parents=True, exist_ok=True)
-    dest = (originals_dir / f"{slug}.pdf").resolve()
     try:
-        # Anchored to the vault root, not to a resolved originals_dir: if
-        # `raw/_originals` is itself a symlink out of the vault, resolving it
-        # first makes this check a tautology that always passes.
-        dest.relative_to(vault_root)
-    except ValueError as e:
-        raise PdfIngestError(
-            f"refusing write: original {dest} escapes vault root {vault_root}"
-        ) from e
-    if dest.exists() and not overwrite:
-        raise FileExistsError(
-            f"retained original already exists: {dest} -- pass overwrite=True to replace."
-        )
-    dest.write_bytes(data)
-    return dest
+        return _write_original(vault_path, slug, data, ".pdf", overwrite=overwrite)
+    except FetchError as e:
+        raise PdfIngestError(str(e)) from e
 
 
 def add_pdf(

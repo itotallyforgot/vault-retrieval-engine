@@ -31,7 +31,8 @@ If you've decided cloud RAG is fine for your use case, this isn't the right tool
 - **Multi-hop graph walks** over wikilink edges plus inferred similarity edges (cosine threshold calibrated for vault topology).
 - **Rank fusion:** vector, lexical, and topology results are fused with reciprocal rank fusion, so a page that only one channel liked can still surface. Every hit reports which channels found it.
 - **Citation chains (not yet on a transport):** `CitationAssembler` walks a retrieved chunk back to its page and onward through `sources:` frontmatter to the raw file. It is built and tested, and the eval harness asserts on it, but `search`, `POST /query`, and the MCP tools do not return it. The one chain that does ship is the MCP `shortest_path` tool, which is a graph walk between two pages rather than a per-hit evidence trail.
-- **PDF ingestion:** `vault-engine add ./paper.pdf` extracts a local PDF's text layer into `raw/`, one `## p. N` section per page, so page markers ride into the index as ordinary headings. The original is retained under `raw/_originals/` and identified in frontmatter by its sha256 (see [ADR 0006](./docs/adr/0006-source-coordinate-preservation.md)). A PDF with no text layer is refused rather than ingested empty. There is no OCR.
+- **PDF ingestion:** `vault-engine add ./paper.pdf` extracts a local PDF's text layer into `raw/`, one `## p. N` section per page, so page markers ride into the index as ordinary headings. A PDF with no text layer is refused rather than ingested empty. There is no OCR.
+- **Retained originals on both ingestion paths:** `add <file.pdf>` and `add <url>` each keep the unaltered original under `raw/_originals/` and identify it in the derived page's frontmatter by path, sha256, and media type (see [ADR 0006](./docs/adr/0006-source-coordinate-preservation.md)). For a URL that is the undecoded response body, not the extracted article, so `vault-engine source` can tell you whether the markdown still matches what the server actually sent.
 - **Watcher:** auto-reindex on filesystem changes, so newly-edited pages are queryable within seconds.
 - **Eval harness:** JSONL fixture runner with latency SLOs and page-coverage assertions. CI runs the eval against a mock embedder + sample vault.
 - **Service surfaces:** MCP stdio (Claude Code, Codex, Cursor) and HTTP/JSON (Tailscale) in addition to the CLI.
@@ -109,13 +110,13 @@ The `mock` embedder is fast and deterministic for iteration. Switch to `sentence
 
 | Command | What it does |
 |---|---|
-| `vault-engine status` | Show vault path, vec store stats, graph stats, last reindex |
+| `vault-engine status` | Show vault path, cache directory, page count, embedding model, and the count of unreadable pages with the reason each was skipped. No vec store, graph, or last-reindex stats: see [Known issues](./KNOWN_ISSUES.md). |
 | `vault-engine reindex [--force]` | Rebuild the index from the vault. Encode-skip on unchanged chunks. |
-| `vault-engine search <query> [--k N]` | Top-k fused results (vector + lexical BM25 + topology, merged by RRF). Prints each hit's chunk index, RRF score, contributing channels, and a chunk excerpt. No citation chains: no transport emits them yet. |
+| `vault-engine search <query> [-k N]` | Top-k fused results (vector + lexical BM25 + topology, merged by RRF). Prints each hit's chunk index, RRF score, contributing channels, and a chunk excerpt. No citation chains: no transport emits them yet. |
 | `vault-engine expand <page>` | Print one page's body, frontmatter stripped. No graph walk. |
-| `vault-engine source <page>` | For a page with `raw_path`, print that raw file verbatim. For a raw page with a retained original (`source_artifact`, written by `add <file.pdf>`), print where the original is, its media type, and whether it still matches the recorded `source_sha256`; the binary itself is not dumped. A `wiki/topics/` page has neither and exits 1. |
+| `vault-engine source <page>` | For a page with `raw_path`, print that raw file verbatim. For a raw page with a retained original (`source_artifact`, written by both `add <file.pdf>` and `add <url>`), print where the original is, its media type, and whether it still matches the recorded `source_sha256`; the binary itself is not dumped. A `wiki/topics/` page has neither and exits 1. |
 | `vault-engine eval --fixtures <path> [--embedder mock\|default]` | Run the JSONL fixture eval; assert latency + page-coverage |
-| `vault-engine add <url> --vault <path>` | One-shot scrape a URL into `raw/` (trafilatura extraction). Note: `add`, `serve`, `mcp`, and `hook` define their own `--vault` flag; placement matters. |
+| `vault-engine add <url> --vault <path>` | One-shot scrape a URL into `raw/` (trafilatura extraction). Retains the fetched bytes at `raw/_originals/<slug>.{html,xhtml,txt,bin}`, named for the declared `Content-Type`. Note: `add`, `serve`, `mcp`, and `hook` define their own `--vault` flag; placement matters. |
 | `vault-engine add <file.pdf> --vault <path>` | One-shot ingest a local PDF into `raw/`, one `## p. N` section per page (pypdf text layer). Retains the original at `raw/_originals/<slug>.pdf`. Local files only; no remote PDF fetch. |
 | `vault-engine mcp --vault <path>` | Start MCP stdio server |
 | `vault-engine serve --vault <path>` | Start HTTP/JSON server |
@@ -204,8 +205,8 @@ Common knobs:
 |---|---|---|---|
 | `vault_path` | `--vault` flag required | — | The directory containing `wiki/` and `raw/` |
 | `cache_dir` | `~/.cache/vault-retrieval` (`%APPDATA%/vault-retrieval` on Windows) | `VAULT_ENGINE_CACHE_DIR` | Embedding cache + vec DB (`embeddings.db`). **One cache directory holds one vault.** The store records the vault it was built from and refuses to open from another; give a second vault its own `--cache <dir>`. |
-| `embedding_model` | `mxbai-embed-large-v1` | — | Or `nomic-embed-text-v1.5`, `all-MiniLM-L6-v2` |
-| `inferred_threshold` | `0.85` | — | Cosine threshold for INFERRED graph edges |
+| `embedding_model` | `mixedbread-ai/mxbai-embed-large-v1` | — | Or `nomic-ai/nomic-embed-text-v1.5`, `sentence-transformers/all-MiniLM-L6-v2`. The full Hugging Face id is the value; `embedder.py` keys its dimension table on it. |
+| `inferred_edge_threshold` | `0.85` | — | Cosine threshold for INFERRED graph edges |
 | `http_bind_addr` | `127.0.0.1` | `VAULT_ENGINE_BIND_ADDR` | HTTP server bind interface (private by default) |
 | `http_port` | `7842` | `VAULT_ENGINE_HTTP_PORT` | HTTP server port |
 | `http_token` | — | `VAULT_ENGINE_HTTP_TOKEN` | Bearer secret for HTTP auth (HS256 JWT or pre-shared) |
@@ -350,7 +351,7 @@ Conventional Commits format. On pull requests and configured push branches, CI r
 
 ## Architecture decisions
 
-See [`docs/adr/`](docs/adr/README.md). Seven ADRs are on `main`: sqlite-vec (0001), NetworkX (0002), the 0.85 INFERRED edge threshold (0003), the router's mode boundaries (0004), the default embedding model (0005), source-coordinate preservation (0006), and the lexical RRF channel (0007). All are Accepted except 0006, which is Proposed. That one stopped at artifact retention, and the coordinate storage itself is still unwritten.
+See [`docs/adr/`](docs/adr/README.md). Seven ADRs are on `main`: sqlite-vec (0001), NetworkX (0002), the 0.85 INFERRED edge threshold (0003), the router's mode boundaries (0004), the default embedding model (0005), source-coordinate preservation (0006), and the lexical RRF channel (0007). All seven are Accepted. 0006 decided artifact retention only and deliberately stopped short of deciding how a coordinate is stored; that half is still unwritten, and 0006 carries a dated revisit log recording that `add <url>` closed its last open negative in v0.4.0.
 
 ## License
 
@@ -358,10 +359,12 @@ MIT. See [LICENSE](LICENSE).
 
 ## Status
 
-**v0.3.0** closes a cross-vault information disclosure: every vault that did not pass `--cache` shared one embeddings store, so one vault's pages and their full chunk text were returned by searches against another. The store now records the vault it was built from and fails closed. It also adds local-file PDF ingestion with ADR 0006 artifact retention, chunk identity through the router and RRF, a prune pass so pages deleted while the engine was down leave the index, and `vault-engine search` dispatching through the Router so the CLI answers from the same three channels as `POST /query`. Current local collection: 274 tests (272 passing, 2 xfail by design on the adversarial word-swap and shuffle classes). Coverage is 89% over `src/vault_engine`, 95% including the test modules; CI gates at 91% on the latter. Seven ADRs on `main`.
+**v0.4.0** gives the chunker a size cap. A header section over `chunk_max_tokens` is split on paragraph boundaries and every sub-chunk keeps the parent section's heading, so a page with one H1 and 8,000 words stops being one chunk carrying one blended embedding, and a PDF page's `## p. N` coordinate survives the split. `chunk_max_tokens` and `chunk_min_tokens` were referenced nowhere in `src/` before this and are now live config. It also makes `add <url>` retain the fetched original under `raw/_originals/` with its sha256 and media type, closing the last open negative in ADR 0006, so both ingestion paths now answer `vault-engine source`. **Upgrading re-chunks your vault and re-embeds every page that re-chunks on the next ordinary `reindex`; `--force` is not needed. See the [upgrade notes](./CHANGELOG.md#040---2026-08-03).** Current local collection: 300 tests (298 passing, 2 xfail by design on the adversarial word-swap and shuffle classes). Coverage is 90.53% over `src/vault_engine` and 95.49% including the test modules; CI gates at 91% on the latter. Seven ADRs on `main`, all Accepted.
+
+**v0.3.0** closes a cross-vault information disclosure: every vault that did not pass `--cache` shared one embeddings store, so one vault's pages and their full chunk text were returned by searches against another. The store now records the vault it was built from and fails closed. It also adds local-file PDF ingestion with ADR 0006 artifact retention, chunk identity through the router and RRF, a prune pass so pages deleted while the engine was down leave the index, and `vault-engine search` dispatching through the Router so the CLI answers from the same three channels as `POST /query`.
 
 **v0.2.0** (2026-07-30, tag `v0.2.0`) added the BM25 lexical channel and RRF fusion, the `AMBIGUOUS` similarity-edge band, the bag-of-words adversarial regression gate, a page-vector cache that removes the per-save reindex stall, trailing-edge watcher debounce, a macOS launchd service path, and a backlog of security fixes (DNS-rebinding pin, two CodeQL `py/bad-tag-filter` fixes, dependency advisory bumps, CI supply-chain hardening).
 
 **v0.1.0** (2026-05-04, tag `v0.1.0`) shipped encode-skip, INFERRED edges, the NSSM Windows service, the post-commit auto-reindex hook, the URL to `raw/` adapter, and ripgrep fallback.
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: the chunker has no size cap, ingestion stops at markdown and text-layer PDFs (no OCR, no docx or epub, no remote PDF fetch), and the CLI still assembles its own `Indexer` instead of going through `Service`, which is object-graph duplication now that the retrieval half is closed.
+See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: the chunker's size cap counts words rather than the embedder's tokens, ingestion stops at markdown and text-layer PDFs (no OCR, no docx or epub, no remote PDF fetch), and the CLI still assembles its own `Indexer` instead of going through `Service`, which is object-graph duplication now that the retrieval half is closed.
