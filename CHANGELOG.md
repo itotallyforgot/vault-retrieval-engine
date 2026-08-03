@@ -9,6 +9,52 @@ in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ## [Unreleased]
 
+### Added
+- The chunker enforces a size cap. A header section longer than
+  `EngineConfig.chunk_max_tokens` is split on paragraph boundaries with
+  greedy packing; a single paragraph that exceeds the cap on its own is
+  hard-split on word boundaries rather than emitted oversize. A page with
+  one H1 and 8,000 words used to be one chunk carrying one embedding — the
+  mean of 8,000 words of unrelated material — so retrieval returned all of
+  it or none of it. `chunk_max_tokens` and `chunk_min_tokens` were
+  referenced nowhere in `src/` before this; `Indexer` now passes both on
+  the `rebuild()` and `reindex_page()` paths, so they are live config
+  rather than documentation.
+- **Every sub-chunk of a split section carries that section's heading.**
+  `pdf_ingester` emits one `## p. N` H2 per printed page and `Chunk.heading`
+  is the only coordinate a chunk has, so a splitter that relabelled its
+  sub-chunks would silently destroy the page number of every PDF-ingested
+  page. Covered by `tests/test_chunker.py` and the PDF-shaped case there.
+
+### Changed
+- `chunk_page` takes `max_tokens` / `min_tokens` keyword arguments,
+  defaulting to the `EngineConfig` values. Existing positional calls are
+  unaffected.
+- Sizes are counted in **whitespace-separated words, not the embedder's
+  tokens**. The chunker has no tokenizer and does not load the model.
+  English prose runs roughly 1.3 model tokens per word, so a section packed
+  to the default 512 is about 670 tokens to mxbai-embed-large and is still
+  truncated by its 512-token window; set `chunk_max_tokens` to ~380 if you
+  want the cap to respect it. The docstring says this rather than implying
+  an exact count.
+- `chunk_min_tokens` folds an undersized *remainder* of a split section back
+  into the previous sub-chunk (which may exceed `chunk_max_tokens` by up to
+  `chunk_min_tokens - 1` words — a 20-word chunk is a worse vector than a
+  530-word one). It does **not** merge across headings. Cross-section
+  merging, which the pre-fix docstring promised, was implemented and then
+  removed: it put page 2's text into a chunk labelled `p. 1` on a
+  PDF-ingested page, and it took the mock eval rig from 6/6 to 5/6. An
+  undersized section is still emitted alone.
+
+### Upgrade note
+- A cache built before this change re-chunks on the next
+  `vault-engine reindex` or `Service.start()`. `--force` is not needed and
+  no stale rows survive: `_index_page_chunks` deletes indices the new chunk
+  set no longer has. Splitting does renumber every chunk after the split
+  point, and the encode-skip is keyed on `(chunk_idx, checksum)`, so every
+  chunk of a re-chunked page is re-embedded even where its text is
+  unchanged. Pages that were already under the cap are skipped as before.
+
 ## [0.3.1] - 2026-08-02
 
 ### Changed
