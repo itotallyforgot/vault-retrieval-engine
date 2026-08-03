@@ -50,30 +50,44 @@ a local PDF's text layer with `pypdf` and writes `raw/<slug>.md` with one
   compression bomb is refused rather than written as a page the indexer
   would silently skip forever.
 
-### The chunker has no size cap, and its docstring says otherwise
+### The chunker's size cap counts words, not the embedder's tokens
 
-`chunker.py` opens with:
+Fixed since Unreleased: `chunk_page` splits a section over
+`chunk_max_tokens` on paragraph boundaries (hard-splitting on words when a
+single paragraph exceeds the cap on its own), so a page with one H1 and
+8,000 words is no longer one chunk with one blended embedding. Both
+`chunk_max_tokens` and `chunk_min_tokens` are now read — the indexer passes
+them on both index paths. What that still does not give you:
 
-> Chunks below a min size are merged into the next chunk; chunks above the
-> max size are split on paragraph boundaries.
-
-Neither behavior exists. `chunk_page` matches `^#{1,2}\s` (H1 and H2 only),
-slices the body between those matches, drops empty slices, and returns. No
-merge, no split, no length check anywhere in the function. `EngineConfig`
-does define `chunk_max_tokens: int = 512`, but the only reference to it in
-the entire repository outside that definition is a test asserting it is
-greater than zero. Nothing reads it.
-
-The practical consequence: a page with a single H1 and 8,000 words of body
-becomes one chunk. That chunk gets one embedding, so retrieval either
-returns the whole thing or none of it, and the vector is the mean of eight
-thousand words of unrelated material. Deeply-nested pages that use H3 and
-below for their real structure chunk as though that structure were not
-there. Header discipline in the vault is doing load-bearing work that the
-engine's own docstring implies it does not need to.
-
-The docstring has been corrected to describe actual behavior. The missing
-size cap is a real gap, not just a documentation bug.
+- **"Tokens" are whitespace words.** The chunker has no tokenizer and does
+  not load the model. English prose runs roughly 1.3 model tokens per word,
+  so a section packed to the default 512 is about 670 tokens to
+  mxbai-embed-large and is still truncated by its 512-token window. Set
+  `chunk_max_tokens` to ~380 if you want the cap to respect that window.
+  The gap between the cap and the model's real count is an approximation,
+  not an exactness claim.
+- **Undersized *sections* are still emitted alone.** Only an undersized
+  *remainder* of a split section folds back into its previous sibling.
+  Merging across a heading was implemented and then removed: on a
+  PDF-ingested page it put page 2's text into a chunk labelled `p. 1`
+  (`pdf_ingester` emits one `## p. N` H2 per printed page, and
+  `Chunk.heading` is the only coordinate a chunk carries), and it dropped
+  the mock eval rig from 6/6 to 5/6. So `chunk_min_tokens` bounds sliver
+  chunks produced by splitting, and nothing else. A 4-word section is still
+  a 4-word chunk.
+- **Folding a remainder can exceed the cap** by up to `chunk_min_tokens - 1`
+  words. Deliberate: a 20-word chunk is a worse vector than a 530-word one.
+- **H3 and below still do not chunk.** Deeply-nested pages whose real
+  structure lives at H3 are chunked as though that structure were not
+  there, capped by size alone.
+- **Existing caches converge on the next index, not automatically.** A
+  store built before the cap re-chunks on any `vault-engine reindex` or on
+  `Service.start()`; `--force` is not needed and no stale rows survive
+  (`_index_page_chunks` drops indices the new chunk set does not have).
+  The cost is real, though: splitting renumbers every chunk after the split
+  point, and the checksum-skip is keyed on `(chunk_idx, checksum)`, so
+  every chunk of a page that re-chunks is re-embedded even where its text
+  did not change.
 
 ## Architecture
 

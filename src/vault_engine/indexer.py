@@ -156,7 +156,12 @@ class Indexer:
         report = IndexReport()
         pages = self._walk_pages(report)
         for page in pages:
-            chunks = chunk_page(page.slug, page.body)
+            chunks = chunk_page(
+                page.slug,
+                page.body,
+                max_tokens=self.cfg.chunk_max_tokens,
+                min_tokens=self.cfg.chunk_min_tokens,
+            )
             if chunks:
                 self._index_page_chunks(page.slug, chunks, report)
             report.pages_processed += 1
@@ -227,7 +232,12 @@ class Indexer:
             else:
                 slug = page.slug
                 page.wikilinks = parse_wikilinks(page.body)
-                chunks = chunk_page(page.slug, page.body)
+                chunks = chunk_page(
+                    page.slug,
+                    page.body,
+                    max_tokens=self.cfg.chunk_max_tokens,
+                    min_tokens=self.cfg.chunk_min_tokens,
+                )
                 if chunks:
                     self._index_page_chunks(page.slug, chunks, report)
                 else:

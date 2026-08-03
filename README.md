@@ -364,4 +364,4 @@ MIT. See [LICENSE](LICENSE).
 
 **v0.1.0** (2026-05-04, tag `v0.1.0`) shipped encode-skip, INFERRED edges, the NSSM Windows service, the post-commit auto-reindex hook, the URL to `raw/` adapter, and ripgrep fallback.
 
-See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: the chunker has no size cap, ingestion stops at markdown and text-layer PDFs (no OCR, no docx or epub, no remote PDF fetch), and the CLI still assembles its own `Indexer` instead of going through `Service`, which is object-graph duplication now that the retrieval half is closed.
+See [`CHANGELOG.md`](./CHANGELOG.md) for full release notes and [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md) for what the engine still does not do. The largest carry-overs: the chunker's size cap counts words rather than the embedder's tokens, ingestion stops at markdown and text-layer PDFs (no OCR, no docx or epub, no remote PDF fetch), and the CLI still assembles its own `Indexer` instead of going through `Service`, which is object-graph duplication now that the retrieval half is closed.
