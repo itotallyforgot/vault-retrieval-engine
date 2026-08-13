@@ -27,4 +27,4 @@ jobs:
     # No `secrets: inherit`: the built-in GITHUB_TOKEN is auto-available inside
     # reusable workflows; the reusable's gitleaks step reads it from its own
     # secrets context. Inheriting all secrets would be needlessly broad.
-    uses: itotallyforgot/.github/.github/workflows/security-baseline.yml@9bf02a92ef17bc0767896306421a677c1a4e7d7e
+    uses: itotallyforgot/.github/.github/workflows/security-baseline.yml@cceef198f9dfbdf32dc39e975be6e8a5ff27f315
