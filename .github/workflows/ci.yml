@@ -23,7 +23,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    uses: itotallyforgot/.github/.github/workflows/ci-python-uv.yml@2ff332d8da908eb84db503eb5d79b63ee80676b5
+    uses: itotallyforgot/.github/.github/workflows/ci-python-uv.yml@3ae15a252574650f697779413581c0273a4dcfa5
     with:
       working-directory: .
       # Measured baseline (uv run pytest --cov --cov-report=term-missing): 92%
@@ -38,7 +38,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,14 +66,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+      - uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Set up uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
           cache-dependency-glob: uv.lock
