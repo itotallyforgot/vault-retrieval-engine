@@ -24,3 +24,11 @@ updates:
     ignore:
       - dependency-name: "torch"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # mcp 2.x is a breaking API change for the MCP server module: the bump to
+      # >=2.0.0 fails `ci / typecheck (pyright)` and `ci / test (py 3.12)`, and
+      # has done so on every daily run since 2026-08-06. Majors are ignored so
+      # the rest of the python group can land; patch and minor security updates
+      # for mcp still come through. Remove this entry once the 2.x migration is
+      # done.
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
